@@ -60,6 +60,26 @@ static int pro2_ltk_init(void) {
     return 0;
 }
 
+/* Restore the paired NS2 console address saved by pro2_pairing_info_save().
+ * Without this, g_console_ns2.ble_addr stays zero after a reboot, so BOTH the
+ * wake/reconnect advertising payload (manufacturer_data[12..17]) AND the LTK
+ * bond injected for the peer (inject_pairing_info_to_ble_ctx) target
+ * 00:00:00:00:00:00 -- the console never recognises the wake adv and the host
+ * can't serve encryption, so auto-reconnect fails. */
+static int pro2_host_addr_init(void) {
+    size_t len = ESP_BD_ADDR_LEN;
+    int ret = storage_get_blob(STORAGE_NS_PAIRING_PRO2, STORAGE_KEY_HOST_ADDR,
+                               g_console_ns2.ble_addr.val, &len);
+    if (ret != 0 || len != ESP_BD_ADDR_LEN) {
+        ESP_LOGW(LOG_BLE_NVS, "NS2 (host) addr not in storage");
+        return -ENOENT;
+    }
+    g_console_ns2.ble_addr.type = 0; /* public */
+    ESP_LOGI(LOG_BLE_NVS, "NS2 addr loaded from storage:");
+    log_print_addr(g_console_ns2.ble_addr.val);
+    return 0;
+}
+
 int pro2_device_init(void) {
     int ret = pro2_addr_init();
     if (ret != 0) {
@@ -73,6 +93,8 @@ int pro2_device_init(void) {
     if (ltk_ret == 0) {
         ESP_LOGI(LOG_APP, "device already paired.");
         log_print_ltk_hex("LTK", g_controller_firmware.ltk);
+        /* Needed for wake-adv targeting + LTK bond injection on reconnect. */
+        pro2_host_addr_init();
     }
 
     const uint8_t version[3] = {0x01, 0x06, 0x01};

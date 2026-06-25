@@ -5,8 +5,9 @@ It emulates a Nintendo Switch **Pro2** controller to a **Switch 2 (NS2)** consol
 BLE. Target board: `esp32s3_devkitc/esp32s3/procpu`.
 
 **Status:** pairs with a real NS2 — the controller appears on Change Grip/Order,
-security level 4, HID reports flow. The host-input path is intentionally inert
-(see *Current state*).
+security level 4, HID reports flow — and auto-reconnects to a paired NS2 after a
+power-cycle (stored bond, level 4, no re-pair). The host-input path is
+intentionally inert (see *Current state*).
 
 Upstream reference project: `/Users/alan/Projects/ESP32-BLE5-NSController-Emulator`.
 
@@ -104,8 +105,10 @@ sub-spec path.
 - `transport_uart.c` uses `DT_CHOSEN(zephyr_console)` — it shares the console UART. Add a
   `zephyr,joy-bridge-uart` chosen node in `app.overlay` before relying on host input + logs at
   the same time.
-- `ble_store.c inject_pairing_info_to_ble_ctx` (LTK bond injection) is implemented but only
-  exercised on an actual NS2 re-pair.
+- Auto-reconnect to a paired NS2 is verified working (stored bond → security level 4 with no
+  cmd-0x15 re-key). It requires `pro2_host_addr_init()` (pro2.c) to restore the saved NS2
+  console address on boot; without it the wake-adv payload and the injected LTK bond
+  (`ble_store.c`) both target `00:00:..:00` and the console can't reconnect.
 - PSRAM is disabled in `prj.conf` (the octal-mode config from the hello-world overlay hung early
   SoC init); re-enable with the correct mode only if needed.
 
