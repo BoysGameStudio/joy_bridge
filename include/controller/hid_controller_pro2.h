@@ -59,8 +59,8 @@ typedef struct __attribute__((packed)) {
     uint8_t counter;            /* 0x00 */
     uint8_t power_info;         /* 0x01 */
     btn_bits_pro2_t buttons;    /* 0x02 */
-    uint8_t left_stick[3];      /* 0x04 */
-    uint8_t right_stick[3];     /* 0x07 */
+    uint8_t left_stick[3];      /* 0x05 */
+    uint8_t right_stick[3];     /* 0x08 */
     uint8_t unknown_0x0b;       /* 0x0B */
     uint8_t unknown_0x0c;       /* 0x0C */
     uint8_t headset_flag;       /* 0x0D */

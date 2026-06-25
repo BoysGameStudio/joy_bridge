@@ -27,7 +27,7 @@ void reverse_bytes(const uint8_t *in, uint8_t *out, size_t len) {
  * (cmd 0x15 / subcmd 0x02). bt_encrypt_be() is standard big-endian AES-128,
  * matching upstream. Returns 0 on success.
  */
-int aes128_ecb(uint8_t *key, uint8_t *in, uint8_t *out) {
+int aes128_ecb(const uint8_t *key, const uint8_t *in, uint8_t *out) {
     int rc = bt_encrypt_be(key, in, out);
     if (rc != 0) {
         ESP_LOGE(LOG_APP, "bt_encrypt_be failed: %d", rc);

@@ -3,10 +3,8 @@
 
 #include <stdint.h>
 
-#define NS2_BD_ADDR_LEN_         6
 #define ESP_BD_ADDR_LEN          6     /* kept for upstream call-site parity */
 
-#define LTK_LEN                  16
 #define LTK_KEY_SIZE             16
 #define MANUFACTURER_DATA_LEN    26
 
@@ -18,8 +16,8 @@ typedef enum {
 typedef struct {
     uint8_t addr[ESP_BD_ADDR_LEN];        /* public identity, big-endian display */
     uint8_t addr_re[ESP_BD_ADDR_LEN];     /* reversed (little-endian) */
-    uint8_t ltk[LTK_LEN];
-    uint8_t ltk_re[LTK_LEN];
+    uint8_t ltk[LTK_KEY_SIZE];
+    uint8_t ltk_re[LTK_KEY_SIZE];
     uint8_t ltk_key_b1[LTK_KEY_SIZE];
     uint8_t manufacturer_data[MANUFACTURER_DATA_LEN];
     controller_type_t type;

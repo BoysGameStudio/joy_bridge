@@ -15,8 +15,9 @@ project(joy_bridge C)
 # Public headers (mirrors the upstream main/include tree).
 target_include_directories(app PRIVATE include)
 
-# Always-built portable core + platform glue.
-file(GLOB_RECURSE app_sources
+# Always-built portable core + platform glue. CONFIGURE_DEPENDS re-globs when
+# files are added/removed so the build doesn't need a manual reconfigure.
+file(GLOB_RECURSE app_sources CONFIGURE_DEPENDS
   src/main.c
   src/app/*.c
   src/buffer/*.c

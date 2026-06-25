@@ -18,11 +18,9 @@ const uint8_t pro2_firmware_info[12] = {
 
 static void pro2_set_button(controller_hid_report_t *report, uint16_t btn_id, bool pressed) {
     if (report == NULL) return;
+    if (btn_id > C) return; /* ignore unknown button id (previously aliased to LClick) */
     hid_report_pro2_t *hid_report = (hid_report_pro2_t *)report->report;
-    btns_pro2 btn = LClick; /* default left stick click */
-    if (btn_id <= C) {
-        btn = (btns_pro2)btn_id;
-    }
+    btns_pro2 btn = (btns_pro2)btn_id;
     uint8_t *btn_bytes = (uint8_t *)&hid_report->buttons;
     switch (btn) {
         case A:      pressed ? (btn_bytes[0] |= 0x02) : (btn_bytes[0] &= ~0x02); break;
