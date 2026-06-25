@@ -124,6 +124,22 @@ sub-spec path.
 - **Benign boot lines:** `settings: set-value failure key bt/hash error(-2)` (no stored DB hash,
   caching off); `Num of Controller's ACL packets != ACL bt_conn_tx contexts (12 != 10)`.
 
+## Protocol capture (DIAG hexdump)
+
+`CONFIG_JOY_BRIDGE_DIAG_HEXDUMP=y` logs every NS2↔controller ATT exchange as `[DIAG]`-tagged INFO
+hexdumps from `src/ble/gatt.c` (the on-wire boundary): RX cmd writes `0x0016`, TX cmd responses
+`0x001e`, other inbound writes, constant reads, and CCC subscribes. Those raw bytes already carry
+the cmd-`0x15` key material — **A1** (in an RX) and **B1** (in a TX) — so a serial capture alone is
+enough to derive the link LTK offline (it's their XOR; exact byte order in `ns2_codec.c`
+cmd-0x15/subcmd-0x04 and `ble_store.c` `ltk_re`). Add `CONFIG_JOY_BRIDGE_DIAG_HEXDUMP_HID=y` to also
+dump HID input reports (`0x000e`, every 5–15 ms — verbose, can overrun the log backend). Needs the
+JOY_BRIDGE log level ≥ INF. Macros live in `include/diag.h`; both compile to nothing when off
+(verified clean under `-Werror`). grep serial for `[DIAG]`, then feed the bytes to Wireshark via
+`text2pcap`. `scripts/capture_pair.py` does a one-shot capture that auto-stops on a real
+cmd-`0x15` + level 4 (erase the bond first — see the script header — else you capture a silent
+reconnect). Example traces: `docs/ns2_pair_capture.txt` (fresh pair, full `0x15` exchange) and
+`docs/ns2_reconnect_capture.txt` (auto-reconnect, which skips `0x15`).
+
 ## If NS2 pairing regresses
 
 The method that cracked it: symmetric greppable `[DIAG]` INFO logging added to BOTH firmwares

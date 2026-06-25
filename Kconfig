@@ -67,6 +67,27 @@ config JOY_BRIDGE_BLE_MIN_CONN_INTERVAL
 	  the ESP32-S3 controller blob currently CANNOT enforce sub-7.5 ms — see
 	  the 5 ms feasibility notes in src/ble/ble.c.
 
+config JOY_BRIDGE_DIAG_HEXDUMP
+	bool "DIAG: hexdump NS2 <-> controller ATT traffic"
+	default n
+	help
+	  Capture the BLE application-layer protocol for reverse-engineering: log
+	  every NS2<->controller ATT exchange as an INFO-level hexdump tagged
+	  "[DIAG] ..." — command writes on 0x0016 (incl. the cmd-0x15 key
+	  agreement), command responses on 0x001e, other inbound writes, the
+	  constant reads, and CCC subscribe changes. grep a serial capture for
+	  "[DIAG]" to lift out the raw bytes. Requires the JOY_BRIDGE log level to
+	  be INF or higher. Leave OFF for normal use.
+
+config JOY_BRIDGE_DIAG_HEXDUMP_HID
+	bool "DIAG: also hexdump HID input reports (high rate)"
+	depends on JOY_BRIDGE_DIAG_HEXDUMP
+	default n
+	help
+	  Additionally hexdump every outbound HID input-report notification on
+	  0x000e. These fire every HID_REPORT_INTERVAL ms (5-15), so this is very
+	  verbose and can overrun the log backend; enable only for short captures.
+
 module = JOY_BRIDGE
 module-str = joy_bridge
 source "subsys/logging/Kconfig.template.log_config"

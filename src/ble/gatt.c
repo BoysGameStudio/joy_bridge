@@ -32,6 +32,7 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(jb_ble_gatt, CONFIG_JOY_BRIDGE_LOG_LEVEL);
 #include "app_log.h"
+#include "diag.h"
 
 /* ---- 128-bit UUIDs (bytes are little-endian, matching upstream) ----------- */
 
@@ -127,6 +128,8 @@ static ssize_t read_const(struct bt_conn *conn, const struct bt_gatt_attr *attr,
     size_t value_len = (attr->uuid == &uuid_0003.uuid) ? sizeof(chr_0003_val)
                      : (attr->uuid == &uuid_0007.uuid) ? sizeof(chr_0007_val)
                      : 0;
+    LOG_DIAG("[DIAG] RD  h=0x%04x len=%u", attr->handle, (unsigned)value_len);
+    LOG_DIAG_DUMP("RD", value, value_len);
     return bt_gatt_attr_read(conn, attr, buf, len, offset, value, value_len);
 }
 
@@ -159,6 +162,8 @@ static ssize_t write_noop(struct bt_conn *conn, const struct bt_gatt_attr *attr,
     ARG_UNUSED(buf);
     ARG_UNUSED(offset);
     ARG_UNUSED(flags);
+    LOG_DIAG("[DIAG] RX write h=0x%04x len=%u", attr->handle, (unsigned)len);
+    LOG_DIAG_DUMP("RX write", buf, len);
     /* Accept and ignore (vibration / firmware-update / unknown sinks). */
     return len;
 }
@@ -177,6 +182,8 @@ static ssize_t write_cmd(struct bt_conn *conn, const struct bt_gatt_attr *attr,
         return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
     }
 
+    LOG_DIAG_DUMP("RX cmd 0x0016", buf, len);
+
     /* Upstream skips the NS2_DATA_EMPTY_LEN header; the command payload starts
      * there and is read-only, so point straight into the write buffer. */
     uint8_t *data_buf = (uint8_t *)buf + NS2_DATA_EMPTY_LEN;
@@ -192,6 +199,7 @@ static ssize_t write_cmd(struct bt_conn *conn, const struct bt_gatt_attr *attr,
     if (rc != 0) {
         ESP_LOGE(LOG_BLE_GATT, "cmd_process failed: %d", rc);
     } else if (cmd_rsp_attr && rsp.rsp_data && rsp.rsp_len) {
+        LOG_DIAG_DUMP("TX rsp 0x001e", rsp.rsp_data, rsp.rsp_len);
         rc = bt_gatt_notify(conn, cmd_rsp_attr, rsp.rsp_data, rsp.rsp_len);
         if (rc != 0) {
             ESP_LOGW(LOG_BLE_GATT, "cmd response notify failed: %d", rc);
@@ -216,6 +224,7 @@ static void ccc_hid_changed(const struct bt_gatt_attr *attr, uint16_t value) {
 static void ccc_noop_changed(const struct bt_gatt_attr *attr, uint16_t value) {
     ARG_UNUSED(attr);
     ARG_UNUSED(value);
+    LOG_DIAG("[DIAG] CCC h=0x%04x val=0x%04x", attr->handle, value);
 }
 
 /* ---- Service A (0x0001-0x0007) -------------------------------------------- *
@@ -342,5 +351,6 @@ int ble_hid_notify(const uint8_t *data, size_t len) {
     if (conn == NULL || hid_input_attr == NULL) {
         return -ENOTCONN;
     }
+    LOG_DIAG_DUMP_HID("TX hid 0x000e", data, len);
     return bt_gatt_notify(conn, hid_input_attr, data, len);
 }
