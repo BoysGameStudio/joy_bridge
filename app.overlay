@@ -1,0 +1,15 @@
+/* 1. Expand total physical flash size to 16 MB */
+&flash0 {
+    reg = <0x0 DT_SIZE_M(16)>;
+};
+
+/* 2. Stretch the storage partition */
+&storage_partition {
+    reg = <0x003b0000 0x00C50000>;
+};
+
+/* 3. Enable the internal 8 MB PSRAM */
+&psram0 {
+    status = "okay";
+    size = <DT_SIZE_M(8)>;
+};

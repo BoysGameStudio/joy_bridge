@@ -1,0 +1,12 @@
+sample:
+  description: NS2 Pro2 controller emulator (Zephyr port of
+    ESP32-BLE5-NSController-Emulator)
+  name: joy_bridge
+common:
+  tags: bluetooth
+  platform_allow:
+    - esp32s3_devkitc/esp32s3/procpu
+  build_only: true
+tests:
+  app.joy_bridge.build:
+    tags: bluetooth

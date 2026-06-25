@@ -1,0 +1,93 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Application Kconfig for joy_bridge. Mirrors the upstream main/Kconfig.projbuild
+# options (symbol names kept identical to minimise churn in the ported sources)
+# and adds Zephyr-specific knobs.
+
+mainmenu "Joy Bridge (NS2 Controller Emulator)"
+
+menu "NSController Configuration"
+
+config MCU_DEBUG
+	bool "Enable MCU debug logging"
+	default n
+	help
+	  Enable detailed debug output for MCU operations (mirrors upstream
+	  CONFIG_MCU_DEBUG). Prefer using the JOY_BRIDGE log level for runtime
+	  filtering; this gates a handful of extra-verbose code paths.
+
+config SAVE_PAIRING_INFO
+	bool "Save pairing information"
+	default y
+	help
+	  Persist pairing information (LTK / peer address) to non-volatile
+	  storage for automatic reconnection on next boot.
+
+choice TRANSPORT_LAYER_CHOICE
+	prompt "Transport Layer"
+	default TRANSPORT_LAYER_UART
+	help
+	  Physical transport that feeds controller input into the emulator.
+
+config TRANSPORT_LAYER_UART
+	bool "UART"
+	help
+	  Use a UART (selected via the devicetree chosen node
+	  "zephyr,joy-bridge-uart", falling back to the console UART) for the
+	  host->controller byte stream.
+
+config TRANSPORT_LAYER_NONE
+	bool "None (no host input)"
+	help
+	  Build without an input transport. The BLE controller emulation still
+	  runs; HID reports stay at their neutral/centered defaults. Useful while
+	  bringing up the BLE stack.
+
+endchoice
+
+choice PROTOCOL_LAYER_CHOICE
+	prompt "Protocol Layer"
+	default PROTOCOL_LAYER_SIMPLE
+	help
+	  Application-layer protocol used to decode the transport byte stream.
+
+config PROTOCOL_LAYER_SIMPLE
+	bool "Simple / none (default)"
+
+config PROTOCOL_LAYER_EASYCON
+	bool "EasyCon protocol layer"
+	help
+	  Decode the EasyCon binary protocol (hello / short / simple / slice /
+	  HID frames). Compiles the src/protocol/easycon parsers.
+
+endchoice
+
+config MAX_PROTOCOL_PARSERS
+	int "Maximum protocol parsers"
+	default 16
+
+config HID_REPORT_INTERVAL
+	int "HID Report Interval (ms)"
+	default 15
+	range 5 100
+	help
+	  Interval between HID input report notifications. Lower values reduce
+	  latency at the cost of CPU and BLE bandwidth.
+
+config JOY_BRIDGE_BLE_MIN_CONN_INTERVAL
+	int "Requested minimum connection interval (units of 1.25 ms)"
+	default 4
+	help
+	  Lower bound (in 1.25 ms units) the peripheral will accept when the NS2
+	  console requests a connection-parameter update. 4 = 5 ms (sub-spec).
+	  NOTE: the Zephyr host honours this only with BT_CONN_PARAM_ANY=y, and
+	  the ESP32-S3 controller blob currently CANNOT enforce sub-7.5 ms — see
+	  the 5 ms feasibility notes in src/ble/ble.c.
+
+module = JOY_BRIDGE
+module-str = joy_bridge
+source "subsys/logging/Kconfig.template.log_config"
+
+endmenu
+
+source "Kconfig.zephyr"

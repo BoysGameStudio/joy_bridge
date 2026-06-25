@@ -1,0 +1,16 @@
+# Zephyr / CMake build output
+build/
+build-*/
+twister-out/
+twister-out.*/
+sysbuild/
+
+# Tooling / editor caches
+.cache/
+compile_commands.json
+*.o
+*.obj
+
+# OS cruft
+.DS_Store
+Thumbs.db
