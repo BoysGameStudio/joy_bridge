@@ -6,8 +6,8 @@ Overview
 
 ``joy_bridge`` is a Zephyr RTOS port of the ESP-IDF project
 **ESP32-BLE5-NSController-Emulator**. It emulates a Nintendo Switch Pro2
-controller to a Nintendo Switch 2 (NS2) over BLE, and bridges host input
-(UART) into HID reports.
+controller to a Nintendo Switch 2 (NS2) over BLE. A UART host-input transport
+is scaffolded, but no application protocol is currently wired.
 
 This is a **scaffold + portable-core migration**: the platform-agnostic logic
 is fully ported, and the platform glue (BLE host, transport, storage) is laid
@@ -20,7 +20,7 @@ Status
 - Builds for ``esp32s3_devkitc/esp32s3/procpu`` (~323 KB text).
 - **Ported (functional):** zero-copy ring buffer, utils (AES via
   ``bt_encrypt_be``), controller/HID engine (Zephyr thread + double buffer),
-  NS2 codec (command handlers + flash-sim), EasyCon protocol parsers.
+  NS2 codec (command handlers + flash-sim).
 - **Skeletons (compile, wired, need completion):**
 
   - ``src/ble/`` — Zephyr ``bt_*`` GATT service (mirrors the NS2 two-service
@@ -56,7 +56,7 @@ Source layout
      buffer/   zero-copy ring buffer
      controller/  HID report engine (pro2)
      codec/    NS2 codec (ns2_codec / pro2 / ns2)
-     protocol/ router + easycon parsers
+     protocol/ generic input-protocol router (no protocol wired)
      ble/      Zephyr bt host glue (ble / gatt / ble_store)
      transport/  UART backend + dispatcher
      storage/  settings-backed persistence

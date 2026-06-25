@@ -4,7 +4,7 @@
 # (Nintendo Switch Pro2 controller emulation over BLE).
 #
 # Migrated from the upstream ESP-IDF project. The layering is preserved:
-#   - portable core: buffer / utils / controller(HID) / codec(ns2) / protocol(easycon)
+#   - portable core: buffer / utils / controller(HID) / codec(ns2) / protocol(router)
 #   - platform glue (Zephyr): ble/ (bt host), transport/ (uart), storage/ (settings)
 
 cmake_minimum_required(VERSION 3.20.0)

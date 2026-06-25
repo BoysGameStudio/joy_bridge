@@ -21,10 +21,6 @@ LOG_MODULE_REGISTER(jb_transport, CONFIG_JOY_BRIDGE_LOG_LEVEL);
 #include "transport/transport_uart.h"
 #endif
 
-#ifdef CONFIG_PROTOCOL_LAYER_EASYCON
-#include "protocol/easycon/easycon_instance.h"
-#endif
-
 /* See upstream for the sizing rationale; 256 B covers normal scheduler jitter. */
 #define TRANSPORT_RX_BUF_SIZE 256
 #define TRANSPORT_TX_BUF_SIZE 256
@@ -81,12 +77,11 @@ int transport_init(void) {
         return -1;
     }
 
-#ifdef CONFIG_PROTOCOL_LAYER_EASYCON
-    g_protocol_inst = &easycon_protocol_instance;
-#else
+    /* No application-layer protocol is currently implemented. The UART backend
+     * still drains host bytes into the RX ring; assign a protocol_instance_t to
+     * g_protocol_inst here to decode them into HID reports. */
     g_protocol_inst = NULL;
-    ESP_LOGW(LOG_TRANSPORT, "No protocol instance for current configuration");
-#endif
+    ESP_LOGI(LOG_TRANSPORT, "No application protocol wired; host input not decoded");
 
 #ifdef CONFIG_TRANSPORT_LAYER_UART
     g_transport.ops = &transport_uart_vtable;

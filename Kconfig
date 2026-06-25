@@ -45,23 +45,6 @@ config TRANSPORT_LAYER_NONE
 
 endchoice
 
-choice PROTOCOL_LAYER_CHOICE
-	prompt "Protocol Layer"
-	default PROTOCOL_LAYER_SIMPLE
-	help
-	  Application-layer protocol used to decode the transport byte stream.
-
-config PROTOCOL_LAYER_SIMPLE
-	bool "Simple / none (default)"
-
-config PROTOCOL_LAYER_EASYCON
-	bool "EasyCon protocol layer"
-	help
-	  Decode the EasyCon binary protocol (hello / short / simple / slice /
-	  HID frames). Compiles the src/protocol/easycon parsers.
-
-endchoice
-
 config MAX_PROTOCOL_PARSERS
 	int "Maximum protocol parsers"
 	default 16
