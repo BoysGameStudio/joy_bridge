@@ -22,6 +22,11 @@
 LOG_MODULE_REGISTER(jb_ns2_codec, CONFIG_JOY_BRIDGE_LOG_LEVEL);
 #include "app_log.h"
 
+/* Max command-response payload (bytes) the codec emits. cmd_process() frames a
+ * response as an 8-byte header + up to this many payload bytes into a single
+ * buffer of this size (see cmd_process() and cmd_0x02_handler()). */
+#define CMD_PROCESS_MAX_RSP_DATA_LEN 0x78
+
 /**
  * @brief FLASH MEMORY SIM, Necessary for the BLE stack to work
  * @warning DO NOT MODIFY!!! All Empty values will be filled with 0xff
@@ -195,7 +200,11 @@ static uint8_t cmd_0x02_handler(const uint8_t subcmd, const uint16_t payload_len
         case 0x04: {
             uint32_t mem_addr = (data_in[14] << 16) | (data_in[13] << 8) | data_in[12];
             size_t read_len = data_in[8];
-            if (read_len > 0x78) {
+            /* The response is an 8-byte header + read_len bytes written into the
+             * CMD_PROCESS_MAX_RSP_DATA_LEN buffer at offset 8, so read_len must
+             * leave room for that header. The former 0x78 bound let
+             * read_memory()'s memset overflow data_out by up to 8 bytes. */
+            if (read_len > CMD_PROCESS_MAX_RSP_DATA_LEN - 8) {
                 ESP_LOGE(LOG_APP, "read_len is too large");
                 return 0x00;
             }

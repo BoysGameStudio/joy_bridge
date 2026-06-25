@@ -143,25 +143,37 @@ static void on_connected(struct bt_conn *conn, uint8_t err) {
             memcpy(g_console_ns2.ble_addr.val, info.le.dst->a.val, NS2_BD_ADDR_LEN);
             ESP_LOGI(LOG_BLE_GAP, "connected, NS2 addr:");
             log_print_addr(g_console_ns2.ble_addr.val);
+            /* bt_conn_le_info.interval (1.25 ms units) is deprecated in this
+             * Zephyr in favour of interval_us; derive the units value once for
+             * the log line and the param-update request below. */
+            uint16_t interval = (uint16_t)(info.le.interval_us / 1250U);
             ESP_LOGI(LOG_BLE_GAP, "initial conn: interval=%u (%u.%02u ms) latency=%u timeout=%u",
-                     info.le.interval, (info.le.interval * 5) / 4,
-                     ((info.le.interval * 5) % 4) * 25, info.le.latency, info.le.timeout);
+                     interval, (interval * 5) / 4,
+                     ((interval * 5) % 4) * 25, info.le.latency, info.le.timeout);
 
             /* Mirror upstream gap.c: do NOT drive a sub-spec interval from the
              * peripheral. Upstream requests itvl_min=6 (7.5 ms) and otherwise
              * keeps the interval/timeout NS2 chose; it only accepts a sub-spec
              * interval if NS2 proposes one (on_le_param_req). Pushing 5 ms at
              * the console mid-handshake is a divergence that can destabilize the
-             * pairing connection. */
-            struct bt_le_conn_param param = {
-                .interval_min = 6,                /* 7.5 ms (upstream itvl_min) */
-                .interval_max = info.le.interval, /* keep NS2's negotiated itvl */
-                .latency = 0,
-                .timeout = info.le.timeout,       /* keep NS2's supervision t/o */
-            };
-            int rc = bt_conn_le_param_update(conn, &param);
-            if (rc != 0) {
-                ESP_LOGW(LOG_BLE_GAP, "conn param update request failed: %d", rc);
+             * pairing connection.
+             *
+             * Only request the update when NS2's interval is at/above our 7.5 ms
+             * floor. If NS2 already chose a sub-spec interval (< 6 units), leave
+             * it untouched — requesting interval_max (= NS2's itvl) below
+             * interval_min (= 6) is a malformed range, and pulling NS2 back up to
+             * 7.5 ms would defeat the 5 ms goal. */
+            if (interval >= 6) {
+                struct bt_le_conn_param param = {
+                    .interval_min = 6,          /* 7.5 ms (upstream itvl_min) */
+                    .interval_max = interval,   /* keep NS2's negotiated itvl */
+                    .latency = 0,
+                    .timeout = info.le.timeout, /* keep NS2's supervision t/o */
+                };
+                int rc = bt_conn_le_param_update(conn, &param);
+                if (rc != 0) {
+                    ESP_LOGW(LOG_BLE_GAP, "conn param update request failed: %d", rc);
+                }
             }
         } else {
             ESP_LOGE(LOG_BLE_GAP, "device not ready, resetting");
