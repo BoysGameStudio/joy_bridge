@@ -90,6 +90,10 @@ int pro2_device_init(void) {
      * g_controller_firmware.addr computed above. */
 
     int ltk_ret = pro2_ltk_init();
+    /* Authoritative paired flag. Do NOT infer "paired" from ltk[0] != 0 later:
+     * a valid LTK can legitimately begin with 0x00 (~1/256), which would
+     * silently break wake-adv + bond injection on reconnect. */
+    g_controller_firmware.paired = (ltk_ret == 0) ? 1 : 0;
     if (ltk_ret == 0) {
         ESP_LOGI(LOG_APP, "device already paired.");
         log_print_ltk_hex("LTK", g_controller_firmware.ltk);

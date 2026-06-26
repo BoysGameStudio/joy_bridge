@@ -361,7 +361,7 @@ int ble_stack_init(void) {
 
     /* If we already have a stored LTK, switch to wake/reconnect advertising and
      * inject the bond so the console can re-encrypt without re-pairing. */
-    if (g_controller_firmware.ltk[0] != 0) {
+    if (g_controller_firmware.paired) {
         g_adv_opcode = 0x81;
         if (inject_pairing_info_to_ble_ctx() != 0) {
             ESP_LOGE(LOG_APP, "Failed to inject pairing info");

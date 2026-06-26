@@ -21,6 +21,7 @@ typedef struct {
     uint8_t ltk_key_b1[LTK_KEY_SIZE];
     uint8_t manufacturer_data[MANUFACTURER_DATA_LEN];
     controller_type_t type;
+    uint8_t paired;                       /* 1 iff a stored LTK was loaded at boot */
 } controller_firmware_t;
 
 extern controller_firmware_t g_controller_firmware;

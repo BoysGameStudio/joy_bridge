@@ -352,6 +352,14 @@ static void uhc_dwc2_handle_chan_events(const struct device *dev)
 			break;
 		}
 		case USB_DWC_HAL_CHAN_EVENT_HALT_REQ:
+			/* Completes a halt requested by uhc_dwc2_ep_dequeue() to cancel
+			 * the active transfer; the channel is quiescent now, so it is
+			 * safe to return it. */
+			if (data->active != NULL && data->active->err == -ECONNRESET) {
+				uhc_xfer_return(dev, data->active, -ECONNRESET);
+				data->active = NULL;
+			}
+			break;
 		case USB_DWC_HAL_CHAN_EVENT_NONE:
 		default:
 			break;
@@ -415,11 +423,26 @@ static void uhc_dwc2_handle_port_event(const struct device *dev)
 
 	case USB_DWC_HAL_PORT_EVENT_DISCONN:
 		usb_dwc_hal_disable_debounce_lock(&data->hal);
-		if (data->active != NULL) {
+		/* An active control transfer is owned by the ch9 layer (freed via
+		 * ch9_req_cb), not by the class removed() path, so completing it here
+		 * is race-free and unblocks usbh_req_setup() immediately. Dropping it
+		 * silently instead would strand the enumeration bus thread on
+		 * ch9_req_sync for the full SETUP_REQ_TIMEOUT (5 s), delaying both this
+		 * removal and any reconnect queued behind it. */
+		if (data->active != NULL && USB_EP_GET_IDX(data->active->ep) == 0) {
 			uhc_xfer_return(dev, data->active, -ENODEV);
-			data->active = NULL;
 		}
+		/* Do NOT uhc_xfer_return() a class transfer here: it posts an
+		 * EP_REQUEST carrying the transfer pointer that the class removed()
+		 * callback then frees on the bus thread -> use-after-free when
+		 * usbh_thread dispatches the stale event. Drop it as active and free
+		 * the channel; class transfers stay linked for removed() to dequeue
+		 * (now unlinking) and free. */
+		data->active = NULL;
 		if (data->chan_allocated) {
+			/* Port error leaves the channel active with no halt IRQ; mark
+			 * it halted so the HAL permits the free. */
+			usb_dwc_hal_chan_mark_halted(&data->chan);
 			usb_dwc_hal_chan_free(&data->hal, &data->chan);
 			data->chan_allocated = false;
 		}
@@ -622,22 +645,45 @@ static int uhc_dwc2_ep_enqueue(const struct device *dev,
 static int uhc_dwc2_ep_dequeue(const struct device *dev,
 			       struct uhc_transfer *const xfer)
 {
-	struct uhc_data *uhc = dev->data;
-	struct uhc_transfer *tmp;
-	unsigned int key;
+	struct uhc_dwc2_data *data = uhc_get_private(dev);
 
-	key = irq_lock();
-	SYS_DLIST_FOR_EACH_CONTAINER(&uhc->ctrl_xfers, tmp, node) {
-		if (tmp == xfer) {
-			tmp->err = -ECONNRESET;
+	/* Runs under the UHC API mutex (uhc_ep_dequeue), mutually exclusive with
+	 * the worker, so list / data->active access needs no further locking. The
+	 * previous version only set ->err and never unlinked, so uhc_xfer_free()
+	 * (which checks only ->queued) freed a still-linked node -> dangling list
+	 * entry / heap corruption on the next attach. */
+
+	if (data->active == xfer) {
+		/* On the channel now: stop it before the caller frees the buffer.
+		 * request_halt() is synchronous only if already halted; otherwise
+		 * the halt completes via HALT_REQ, which returns the marked
+		 * transfer (see uhc_dwc2_handle_chan_events). */
+		xfer->err = -ECONNRESET;
+		if (data->chan_allocated &&
+		    !usb_dwc_hal_chan_request_halt(&data->chan)) {
+			return 0;
 		}
-	}
-	SYS_DLIST_FOR_EACH_CONTAINER(&uhc->bulk_xfers, tmp, node) {
-		if (tmp == xfer) {
-			tmp->err = -ECONNRESET;
+		data->active = NULL;
+		if (sys_dnode_is_linked(&xfer->node)) {
+			uhc_xfer_return(dev, xfer, -ECONNRESET);
 		}
+		return 0;
 	}
-	irq_unlock(key);
+
+	if (!sys_dnode_is_linked(&xfer->node)) {
+		return 0;
+	}
+
+	if (USB_EP_GET_IDX(xfer->ep) == 0) {
+		/* Control transfer: owned by the ch9 layer, which frees it from its
+		 * completion callback. Unlink and fire the cancelled return. */
+		uhc_xfer_return(dev, xfer, -ECONNRESET);
+	} else {
+		/* Class-endpoint transfer: the class owns the transfer/buffer and
+		 * frees it directly after dequeue, so just unlink in place; firing
+		 * a completion here would race that free. */
+		sys_dlist_remove(&xfer->node);
+	}
 
 	return 0;
 }

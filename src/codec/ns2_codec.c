@@ -197,7 +197,9 @@ static uint8_t cmd_0x02_handler(const uint8_t subcmd, const uint16_t payload_len
                                 const uint8_t *data_in, uint8_t *data_out) {
     switch (subcmd) {
         case 0x04: {
-            if (payload_len < 15) {
+            /* memcpy below copies 8 bytes from data_in+8 (data_in[8..15]), so
+             * the payload must hold >= 16 bytes; < 16 would over-read by one. */
+            if (payload_len < 16) {
                 ESP_LOGE(LOG_APP, "cmd 0x02/0x04 payload too short: %u", payload_len);
                 return 0x00;
             }
