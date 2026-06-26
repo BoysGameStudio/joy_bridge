@@ -35,9 +35,17 @@ LOG_MODULE_REGISTER(jb_xinput_class, CONFIG_JOY_BRIDGE_LOG_LEVEL);
 #define XINPUT_IF_SUBCLASS 0x5D
 #define XINPUT_IF_PROTOCOL 0x01
 
+/* Depth of the interrupt-IN transfer pool. Keeping several transfers queued at
+ * once stops the UHC queue from emptying between reports, so the host controller
+ * pipelines polls continuously instead of idling for each per-report re-submit
+ * round trip (the dominant input latency). This is the Zephyr-UHC equivalent of
+ * the ESP-IDF HCD's double-buffering (NUM_BUFFERS), with margin. 4 transfers +
+ * 4x mps buffers fit the default UHC pools (UHC_XFER_COUNT=16, UHC_BUF_COUNT=16). */
+#define XINPUT_NUM_XFERS 4
+
 struct xinput_instance {
 	struct usb_device *udev;
-	struct uhc_transfer *xfer;
+	struct uhc_transfer *xfers[XINPUT_NUM_XFERS];
 	uint16_t ep_mps;
 	bool running;
 };
@@ -104,13 +112,19 @@ static bool xinput_find_in_ep(struct usb_device *udev, uint8_t iface,
 	return false;
 }
 
-/* Submit (or re-submit) the interrupt-IN polling transfer. */
-static int xinput_submit(struct xinput_instance *inst)
+/* Free every transfer in the pool (each buffer is released with its transfer). */
+static void xinput_free_pool(struct usb_device *udev, struct xinput_instance *inst)
 {
-	return usbh_xfer_enqueue(inst->udev, inst->xfer);
+	for (int i = 0; i < XINPUT_NUM_XFERS; i++) {
+		if (inst->xfers[i] != NULL) {
+			usbh_xfer_free(udev, inst->xfers[i]);
+			inst->xfers[i] = NULL;
+		}
+	}
 }
 
-/* Interrupt-IN completion: parse the report, then re-arm the poll. */
+/* Interrupt-IN completion: parse the report, then re-arm THIS transfer, which
+ * replenishes its slot while the rest of the pool keeps the channel polling. */
 static int xinput_in_cb(struct usb_device *udev, struct uhc_transfer *xfer)
 {
 	struct xinput_instance *inst = xfer->priv;
@@ -146,7 +160,7 @@ static int xinput_in_cb(struct usb_device *udev, struct uhc_transfer *xfer)
 	if (xfer->buf != NULL) {
 		net_buf_reset(xfer->buf);
 	}
-	(void)xinput_submit(inst);
+	(void)usbh_xfer_enqueue(udev, xfer);
 
 	return 0;
 }
@@ -171,52 +185,65 @@ static int xinput_probe(struct usbh_class_data *const c_data,
 		return -ENOTSUP;
 	}
 
-	struct uhc_transfer *xfer =
-		usbh_xfer_alloc(udev, ep_addr, xinput_in_cb, inst);
-	if (xfer == NULL) {
-		return -ENOMEM;
-	}
-	xfer->type = USB_EP_TYPE_INTERRUPT;
-	xfer->mps = ep_mps;
-	xfer->interval = ep_interval;
-
-	struct net_buf *buf = usbh_xfer_buf_alloc(udev, ep_mps);
-	if (buf == NULL) {
-		usbh_xfer_free(udev, xfer);
-		return -ENOMEM;
-	}
-	usbh_xfer_buf_add(udev, xfer, buf);
-
 	inst->udev = udev;
-	inst->xfer = xfer;
 	inst->ep_mps = ep_mps;
 	inst->running = true;
 
-	int ret = xinput_submit(inst);
-	if (ret != 0) {
-		LOG_ERR("failed to submit XInput IN transfer: %d", ret);
-		inst->running = false;
-		inst->udev = NULL;
-		inst->xfer = NULL;
-		usbh_xfer_free(udev, xfer);
-		return ret;
+	/* Allocate the transfer pool (each transfer gets its own buffer). A partial
+	 * pool (if the UHC pools are exhausted) still works, just shallower. */
+	for (int i = 0; i < XINPUT_NUM_XFERS; i++) {
+		struct uhc_transfer *xfer =
+			usbh_xfer_alloc(udev, ep_addr, xinput_in_cb, inst);
+		if (xfer == NULL) {
+			break;
+		}
+		xfer->type = USB_EP_TYPE_INTERRUPT;
+		xfer->mps = ep_mps;
+		xfer->interval = ep_interval;
+
+		struct net_buf *buf = usbh_xfer_buf_alloc(udev, ep_mps);
+		if (buf == NULL) {
+			usbh_xfer_free(udev, xfer);
+			break;
+		}
+		usbh_xfer_buf_add(udev, xfer, buf);
+		inst->xfers[i] = xfer;
 	}
 
-	LOG_INF("XInput controller bound (iface %u, ep 0x%02x, mps %u)",
-		iface, ep_addr, ep_mps);
+	/* Submit them all so the controller polls a continuously-queued pipeline. */
+	int submitted = 0;
+	for (int i = 0; i < XINPUT_NUM_XFERS; i++) {
+		if (inst->xfers[i] != NULL &&
+		    usbh_xfer_enqueue(udev, inst->xfers[i]) == 0) {
+			submitted++;
+		}
+	}
+	if (submitted == 0) {
+		LOG_ERR("failed to submit any XInput IN transfer");
+		inst->running = false;
+		xinput_free_pool(udev, inst);
+		inst->udev = NULL;
+		return -EIO;
+	}
+
+	LOG_INF("XInput controller bound (iface %u, ep 0x%02x, mps %u, bInterval %u, pool %d/%d)",
+		iface, ep_addr, ep_mps, ep_interval, submitted, XINPUT_NUM_XFERS);
 	return 0;
 }
 
 static int xinput_removed(struct usbh_class_data *const c_data)
 {
 	struct xinput_instance *inst = c_data->priv;
+	struct usb_device *udev = inst->udev;
 
 	inst->running = false;
-	if (inst->xfer != NULL && inst->udev != NULL) {
-		(void)usbh_xfer_dequeue(inst->udev, inst->xfer);
-		usbh_xfer_free(inst->udev, inst->xfer);
+	for (int i = 0; i < XINPUT_NUM_XFERS; i++) {
+		if (inst->xfers[i] != NULL && udev != NULL) {
+			(void)usbh_xfer_dequeue(udev, inst->xfers[i]);
+			usbh_xfer_free(udev, inst->xfers[i]);
+		}
+		inst->xfers[i] = NULL;
 	}
-	inst->xfer = NULL;
 	inst->udev = NULL;
 
 	/* Park the emulated controller at neutral so a removed pad does not leave

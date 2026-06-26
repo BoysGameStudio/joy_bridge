@@ -25,6 +25,10 @@ LOG_MODULE_REGISTER(jb_hid_controller, CONFIG_JOY_BRIDGE_LOG_LEVEL);
 K_THREAD_STACK_DEFINE(ctrl_task_stack, CTRL_TASK_STACK_SIZE);
 static struct k_thread ctrl_task_data;
 
+/* Signalled by hid_commit() so the report thread sends a freshly committed
+ * report immediately instead of waiting for the next periodic tick. */
+static K_SEM_DEFINE(report_ready_sem, 0, 1);
+
 controller_handle_t g_hid_controller = {
     .ops = &controller_ops,
     .hid_ops = NULL,
@@ -39,6 +43,42 @@ controller_handle_t g_hid_controller = {
     .ns2_notification_handle = NS2_NOTIFICATION_HANDLE
 };
 
+#ifdef CONFIG_JOY_BRIDGE_DIAG_LATENCY
+/* Set by xinput_map_report() when an XInput report arrives (CPU cycle stamp). */
+volatile uint32_t jb_diag_in_cyc;
+volatile uint32_t jb_diag_in_cnt;
+
+/* Once per second: XInput report rate + arrival->notify latency (microseconds).
+ * Latency is sampled only on iterations that actually carried a fresh report. */
+static void jb_diag_lat_sample(bool had_new) {
+    static int64_t win_ms;
+    static uint32_t last_cnt, lat_sum_us, lat_n, lat_max_us;
+
+    if (had_new) {
+        uint32_t us = k_cyc_to_us_floor32(k_cycle_get_32() - jb_diag_in_cyc);
+        lat_sum_us += us;
+        lat_n++;
+        if (us > lat_max_us) {
+            lat_max_us = us;
+        }
+    }
+    int64_t now = k_uptime_get();
+    if (win_ms == 0) {
+        win_ms = now;
+    }
+    if (now - win_ms >= 1000) {
+        uint32_t cnt = jb_diag_in_cnt;
+        ESP_LOGI(LOG_HID, "[LAT] usb=%u rep/s  in->notify avg=%u us max=%u us (n=%u)",
+                 cnt - last_cnt, lat_n ? lat_sum_us / lat_n : 0u, lat_max_us, lat_n);
+        last_cnt = cnt;
+        win_ms = now;
+        lat_sum_us = 0;
+        lat_n = 0;
+        lat_max_us = 0;
+    }
+}
+#endif
+
 static void controller_task(void *p1, void *p2, void *p3) {
     controller_handle_t *ctrl = (controller_handle_t *)p1;
     ARG_UNUSED(p2);
@@ -46,11 +86,27 @@ static void controller_task(void *p1, void *p2, void *p3) {
 
     ESP_LOGI(LOG_HID, "controller report task start, interval: %dms", HID_REPORT_INTERVAL);
 
+    int64_t last_send_ms = 0;
+
     while (ctrl->task_running) {
         /* Connected + HID characteristic subscribed + DEV_READY? */
         if (!ble_hid_ready()) {
             k_msleep(100);
+            last_send_ms = 0;
             continue;
+        }
+
+        /* Wake the instant a report is committed; fall back to a keepalive after
+         * HID_REPORT_INTERVAL so a held/idle state still streams at the normal
+         * cadence. */
+        k_sem_take(&report_ready_sem, K_MSEC(HID_REPORT_INTERVAL));
+
+        /* Cap sends at ~one per HID_REPORT_INTERVAL (== connection interval) so
+         * dense input can't backlog the BLE TX queue; the swap below still sends
+         * the freshest committed report. */
+        int64_t now_ms = k_uptime_get();
+        if (last_send_ms != 0 && (now_ms - last_send_ms) < HID_REPORT_INTERVAL) {
+            k_msleep(HID_REPORT_INTERVAL - (uint32_t)(now_ms - last_send_ms));
         }
 
         if (ctrl->buffer.front_buffer != NULL) {
@@ -69,6 +125,9 @@ static void controller_task(void *p1, void *p2, void *p3) {
                 continue;
             }
 
+#ifdef CONFIG_JOY_BRIDGE_DIAG_LATENCY
+            bool had_new = ctrl->buffer.swap_request;
+#endif
             /* Swap front/back if a commit was requested. k_sched_lock makes the
              * three-pointer swap atomic against the writer's get_back_buffer()
              * read, so it can never observe the half-swapped state and write the
@@ -96,11 +155,12 @@ static void controller_task(void *p1, void *p2, void *p3) {
                     k_msleep(1);
                 }
             }
+#ifdef CONFIG_JOY_BRIDGE_DIAG_LATENCY
+            jb_diag_lat_sample(had_new);
+#endif
         }
 
-        /* A fixed sleep is adequate here; for jitter-free cadence switch to an
-         * absolute periodic schedule (k_timer / k_uptime delta). */
-        k_msleep(HID_REPORT_INTERVAL);
+        last_send_ms = k_uptime_get();
     }
 }
 
@@ -229,6 +289,7 @@ static void controller_hid_commit_impl(controller_handle_t *ctrl) {
     }
     MEMORY_BARRIER();
     ctrl->buffer.swap_request = 1;
+    k_sem_give(&report_ready_sem);
 }
 
 static void controller_hid_reset_impl(controller_handle_t *ctrl) {

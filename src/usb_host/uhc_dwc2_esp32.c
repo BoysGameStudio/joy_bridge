@@ -44,6 +44,44 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(uhc_dwc2_esp32, CONFIG_UHC_DRIVER_LOG_LEVEL);
 
+#ifdef CONFIG_JOY_BRIDGE_DIAG_LATENCY
+#include <zephyr/sys/printk.h>
+/* Latency localisation: time from an interrupt-IN completion to the next re-arm
+ * (the single-active SW round-trip). Logged once/sec via printk so it does not
+ * depend on the UHC log level. */
+static uint32_t diag_cplt_cyc;
+static uint64_t diag_rearm_sum_us;
+static uint32_t diag_rearm_n;
+static int64_t  diag_win_ms;
+
+static inline void diag_mark_cplt(const struct uhc_transfer *xfer)
+{
+	if (xfer->type == USB_EP_TYPE_INTERRUPT) {
+		diag_cplt_cyc = k_cycle_get_32();
+	}
+}
+
+static inline void diag_mark_rearm(const struct uhc_transfer *xfer)
+{
+	if (xfer->type != USB_EP_TYPE_INTERRUPT || diag_cplt_cyc == 0) {
+		return;
+	}
+	diag_rearm_sum_us += k_cyc_to_us_floor32(k_cycle_get_32() - diag_cplt_cyc);
+	diag_rearm_n++;
+	int64_t now = k_uptime_get();
+	if (diag_win_ms == 0) {
+		diag_win_ms = now;
+	}
+	if (now - diag_win_ms >= 1000) {
+		printk("[USB] cplt->rearm avg=%u us  n=%u\n",
+		       (uint32_t)(diag_rearm_sum_us / diag_rearm_n), diag_rearm_n);
+		diag_rearm_sum_us = 0;
+		diag_rearm_n = 0;
+		diag_win_ms = now;
+	}
+}
+#endif
+
 static K_KERNEL_STACK_DEFINE(uhc_dwc2_thread_stack, 4096);
 
 /*
@@ -104,7 +142,13 @@ static void uhc_dwc2_begin_stage(struct uhc_dwc2_data *data)
 	uint8_t *buf_ptr = NULL;
 	int len = 0;
 	bool dir_in;
-	const int list_len = is_ctrl ? UHC_DWC2_CTRL_LIST_LEN : UHC_DWC2_QTD_LIST_LEN;
+	/* desc_list_len = number of FILLED QTDs, matching the ESP-IDF HCD (which
+	 * passes num_qtds for INTR). Bulk/interrupt here fill exactly one MPS-sized
+	 * QTD. Passing the allocated array length (32) instead made the periodic
+	 * scheduler cycle the channel through 32 mostly-null slots, servicing our QTD
+	 * only ~once per frame-list wrap — capping the rate at ~10/s on a 1 ms
+	 * (bInterval=1) endpoint. */
+	const int list_len = is_ctrl ? UHC_DWC2_CTRL_LIST_LEN : 1;
 
 	if (is_ctrl) {
 		switch (xfer->stage) {
@@ -149,6 +193,9 @@ static void uhc_dwc2_begin_stage(struct uhc_dwc2_data *data)
 	}
 
 	/* Bulk / interrupt: a single data stage. */
+#ifdef CONFIG_JOY_BRIDGE_DIAG_LATENCY
+	diag_mark_rearm(xfer);
+#endif
 	dir_in = USB_EP_DIR_IS_IN(xfer->ep);
 	usb_dwc_hal_chan_set_dir(&data->chan, dir_in);
 	usb_dwc_hal_chan_set_pid(&data->chan, data->in_pid);
@@ -261,6 +308,9 @@ static void uhc_dwc2_on_cplt(const struct device *dev)
 	}
 
 	/* Bulk / interrupt: save the toggle, record received bytes, complete. */
+#ifdef CONFIG_JOY_BRIDGE_DIAG_LATENCY
+	diag_mark_cplt(xfer);
+#endif
 	data->in_pid = usb_dwc_hal_chan_get_pid(&data->chan);
 	if (USB_EP_DIR_IS_IN(xfer->ep)) {
 		int rcvd = net_buf_tailroom(xfer->buf) - rem_len;

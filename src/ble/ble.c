@@ -69,6 +69,50 @@ static void adv_restart_work_fn(struct k_work *work) {
 }
 static K_WORK_DELAYABLE_DEFINE(adv_restart_work, adv_restart_work_fn);
 
+#if defined(CONFIG_BT_SMP) && CONFIG_JOY_BRIDGE_BLE_FAST_CONN_INTERVAL > 0
+/* Post-pairing, request a faster connection interval to cut input latency. The
+ * NS2 (central) decides whether to accept; on_le_param_updated() logs the
+ * negotiated value. Fired only after security level 4 (+ a settle delay) so it
+ * cannot perturb the load-bearing pairing handshake. */
+static uint8_t fast_interval_attempts;
+
+/* The NS2 honours a peripheral param-update request only intermittently, so
+ * retry every few seconds until the link reaches the target interval (or give
+ * up after a bounded number of tries). */
+static void fast_interval_work_fn(struct k_work *work) {
+    struct bt_conn *conn = default_conn;
+    if (conn == NULL) {
+        return;
+    }
+
+    struct bt_conn_info info;
+    if (bt_conn_get_info(conn, &info) == 0 &&
+        (info.le.interval_us / 1250U) <= CONFIG_JOY_BRIDGE_BLE_FAST_CONN_INTERVAL) {
+        return; /* already at/below the requested interval — done */
+    }
+    if (fast_interval_attempts >= 5) {
+        ESP_LOGW(LOG_BLE_GAP, "NS2 kept the slow interval after %u requests",
+                 fast_interval_attempts);
+        return;
+    }
+    fast_interval_attempts++;
+
+    uint16_t itvl = CONFIG_JOY_BRIDGE_BLE_FAST_CONN_INTERVAL;
+    struct bt_le_conn_param param = {
+        .interval_min = itvl,
+        .interval_max = itvl,
+        .latency = 0,
+        .timeout = 200, /* 2 s supervision */
+    };
+    bt_conn_le_param_update(conn, &param);
+    ESP_LOGI(LOG_BLE_GAP, "fast conn interval request #%u: %u (%u.%02u ms)",
+             fast_interval_attempts, itvl, (itvl * 5) / 4, ((itvl * 5) % 4) * 25);
+
+    k_work_reschedule(k_work_delayable_from_work(work), K_MSEC(3000));
+}
+static K_WORK_DELAYABLE_DEFINE(fast_interval_work, fast_interval_work_fn);
+#endif
+
 void ble_advertise(void) {
     if (g_controller_firmware.type == CONTROLLER_TYPE_JOYCON) {
         ESP_LOGE(LOG_APP, "Joycon not implemented");
@@ -193,6 +237,10 @@ static void on_disconnected(struct bt_conn *conn, uint8_t reason) {
     /* Stop the HID report thread (mirrors upstream gap.c disconnect). */
     g_hid_controller.ops->stop_task(&g_hid_controller);
 
+#if defined(CONFIG_BT_SMP) && CONFIG_JOY_BRIDGE_BLE_FAST_CONN_INTERVAL > 0
+    k_work_cancel_delayable(&fast_interval_work);
+#endif
+
     k_work_reschedule(&adv_restart_work, K_MSEC(3000));
 }
 
@@ -219,6 +267,14 @@ static void on_security_changed(struct bt_conn *conn, bt_security_t level,
                                 enum bt_security_err err) {
     ARG_UNUSED(conn);
     ESP_LOGI(LOG_BLE_GAP, "security changed: level=%d err=%d", level, err);
+#if CONFIG_JOY_BRIDGE_BLE_FAST_CONN_INTERVAL > 0
+    if (err == BT_SECURITY_ERR_SUCCESS && level >= BT_SECURITY_L4) {
+        /* Settle, then ask NS2 for the faster interval (post-pairing only),
+         * retrying since the NS2 applies it only intermittently. */
+        fast_interval_attempts = 0;
+        k_work_reschedule(&fast_interval_work, K_MSEC(1500));
+    }
+#endif
 }
 #endif
 

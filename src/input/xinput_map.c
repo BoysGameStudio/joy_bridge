@@ -46,6 +46,15 @@ void xinput_map_report(const xinput_report_t *r)
         return;
     }
 
+#ifdef CONFIG_JOY_BRIDGE_DIAG_LATENCY
+    /* Stamp the moment this XInput report arrived (consumed by the report
+     * thread to compute arrival->notify latency). */
+    extern volatile uint32_t jb_diag_in_cyc;
+    extern volatile uint32_t jb_diag_in_cnt;
+    jb_diag_in_cyc = k_cycle_get_32();
+    jb_diag_in_cnt++;
+#endif
+
     const controller_hid_ops_t *h = g_hid_controller.hid_ops;
     controller_hid_report_t *bb = (g_hid_controller.ops != NULL)
         ? g_hid_controller.ops->get_back_buffer(&g_hid_controller)
