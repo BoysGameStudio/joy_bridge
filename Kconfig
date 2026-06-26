@@ -57,6 +57,19 @@ config JOY_BRIDGE_BLE_FAST_CONN_INTERVAL
 	  setup. Requested only AFTER pairing (plus a settle), with a bounded retry;
 	  the negotiated result is logged by on_le_param_updated().
 
+config JOY_BRIDGE_SLEEP_ON_NS2_OFF
+	bool "Deep-sleep the ESP32 when the BLE link to the NS2 drops"
+	select POWEROFF
+	default n
+	help
+	  When the BLE link to the NS2 drops (the console sleeps / powers off, or
+	  the link is otherwise lost), enter deep sleep instead of re-advertising.
+	  Re-advertising the wake packet would immediately wake the console back up,
+	  so this is the only way to actually power down with it (~10 uA). Wake by
+	  pressing BOOT (GPIO0): the chip reboots, re-advertises, and the NS2
+	  reconnects. Tap BOOT briefly — holding it through the wake-reset enters
+	  serial-download mode, since GPIO0 is the boot strapping pin.
+
 config JOY_BRIDGE_DIAG_HEXDUMP
 	bool "DIAG: hexdump NS2 <-> controller ATT traffic"
 	default n

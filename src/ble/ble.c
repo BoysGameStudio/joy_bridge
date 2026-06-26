@@ -29,6 +29,12 @@
 
 #include <esp_mac.h>
 
+#ifdef CONFIG_JOY_BRIDGE_SLEEP_ON_NS2_OFF
+#include <zephyr/sys/poweroff.h>
+#include <zephyr/logging/log_ctrl.h>
+#include <esp_sleep.h>
+#endif
+
 #include <string.h>
 #include <errno.h>
 
@@ -68,6 +74,28 @@ static void adv_restart_work_fn(struct k_work *work) {
     ble_advertise();
 }
 static K_WORK_DELAYABLE_DEFINE(adv_restart_work, adv_restart_work_fn);
+
+#ifdef CONFIG_JOY_BRIDGE_SLEEP_ON_NS2_OFF
+/* BOOT button on the esp32s3_devkitc — GPIO0, an RTC-capable pad usable as an
+ * ext1 deep-sleep wake source. */
+#define NS2_WAKE_GPIO 0
+
+/* Deferred from on_disconnected so the disconnect log flushes and the BT stack
+ * settles before the radio dies. Arms the BOOT-button wake, then deep-sleeps
+ * (does not return; wakes via a full reset -> fresh boot -> ble_advertise). */
+static void ns2_sleep_work_fn(struct k_work *work) {
+    ARG_UNUSED(work);
+    if (esp_sleep_enable_ext1_wakeup(BIT64(NS2_WAKE_GPIO),
+                                     ESP_EXT1_WAKEUP_ANY_LOW) != ESP_OK) {
+        ESP_LOGE(LOG_BLE_GAP, "ext1 wake config failed; only RESET will wake");
+    }
+    /* Flush the queued "deep sleep" log synchronously — the deferred backend
+     * would otherwise lose it when the CPU and UART power down below. */
+    log_panic();
+    sys_poweroff();
+}
+static K_WORK_DELAYABLE_DEFINE(ns2_sleep_work, ns2_sleep_work_fn);
+#endif
 
 #if defined(CONFIG_BT_SMP) && CONFIG_JOY_BRIDGE_BLE_FAST_CONN_INTERVAL > 0
 /* Post-pairing, request a faster connection interval to cut input latency. The
@@ -227,7 +255,7 @@ static void on_connected(struct bt_conn *conn, uint8_t err) {
 }
 
 static void on_disconnected(struct bt_conn *conn, uint8_t reason) {
-    ESP_LOGI(LOG_BLE_GAP, "disconnected, reason=%u, re-advertise in 3s", reason);
+    ESP_LOGI(LOG_BLE_GAP, "disconnected, reason=%u", reason);
 
     if (default_conn) {
         bt_conn_unref(default_conn);
@@ -241,7 +269,16 @@ static void on_disconnected(struct bt_conn *conn, uint8_t reason) {
     k_work_cancel_delayable(&fast_interval_work);
 #endif
 
+#ifdef CONFIG_JOY_BRIDGE_SLEEP_ON_NS2_OFF
+    /* Any disconnect -> deep sleep instead of re-advertising. Re-advertising the
+     * wake packet would immediately wake the NS2 back up (observed on hardware),
+     * and the goal is to power down with the console. Tap BOOT (GPIO0) to wake:
+     * fresh boot -> re-advertise -> reconnect. */
+    ESP_LOGI(LOG_BLE_GAP, "disconnected; deep sleep (tap BOOT/GPIO0 to wake)");
+    k_work_reschedule(&ns2_sleep_work, K_MSEC(250));
+#else
     k_work_reschedule(&adv_restart_work, K_MSEC(3000));
+#endif
 }
 
 static bool on_le_param_req(struct bt_conn *conn, struct bt_le_conn_param *param) {
