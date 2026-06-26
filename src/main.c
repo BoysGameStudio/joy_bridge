@@ -9,6 +9,7 @@
 #include "controller/hid_controller.h"
 #include "transport/transport.h"
 #include "storage.h"
+#include "usb_host.h"
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(jb_main, CONFIG_JOY_BRIDGE_LOG_LEVEL);
@@ -56,6 +57,16 @@ int main(void) {
     } else {
         ESP_LOGI(LOG_APP, "BLE stack initialized");
     }
+
+#ifdef CONFIG_JOY_BRIDGE_USB_XINPUT
+    /* USB host (XInput controller input). Started after BLE — the load-bearing
+     * path comes up first, and a USB failure must never block it. */
+    if (xinput_host_start() == 0) {
+        ESP_LOGI(LOG_APP, "USB host (XInput) started");
+    } else {
+        ESP_LOGE(LOG_APP, "USB host (XInput) start failed; continuing without host input");
+    }
+#endif
 
     /* Zephyr keeps the kernel + worker threads running after main returns. */
     return 0;

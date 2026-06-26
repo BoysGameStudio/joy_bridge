@@ -13,3 +13,14 @@
     status = "okay";
     size = <DT_SIZE_M(8)>;
 };
+
+/* 4. Bring up USB-OTG in HOST mode for the XInput controller bridge.
+ *
+ * Reuse the existing "espressif,esp32-usb-otg" node (its binding includes
+ * snps,dwc2.yaml, providing reg/interrupts/clocks). USB *device* (UDC) mode is
+ * left disabled in prj.conf, so nothing else binds this compatible; the in-app
+ * host driver binds it via DT_DRV_COMPAT espressif_esp32_usb_otg.
+ */
+&usb_otg {
+    status = "okay";
+};

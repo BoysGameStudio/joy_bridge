@@ -96,12 +96,102 @@ is needed**; only on-hardware confirmation of the negotiated interval remains. `
 requests a param update when NS2's interval ≥ 6 units, avoiding a malformed `min>max` on the
 sub-spec path.
 
+## USB host / XInput controller input
+
+The bridge's input source: a wired **XInput (Xbox 360 protocol)** controller plugged into the
+ESP32-S3 USB-OTG port drives the emulated Pro2. Built when `CONFIG_JOY_BRIDGE_USB_XINPUT=y`
+(default in `prj.conf`, which also sets the transport layer to NONE — XInput replaces the inert
+UART host-input path).
+
+**Why it's a from-scratch driver:** upstream Zephyr has **no DWC2 host (UHC) driver** for the S3
+OTG core (`drivers/usb/uhc/` ships only max3421e / NXP mcux / virtual). XInput is also
+vendor-specific (interface class `0xFF`, subclass `0x5D`, protocol `0x01`), not USB-HID, so it
+needs a custom host class driver regardless. Both are written in-app:
+
+```
+src/usb_host/uhc_dwc2_esp32.{c,h}  native UHC host-controller driver over the Espressif USB HAL
+src/usb_host/xinput_class.c        USBH class driver (matches 0xFF/0x5D/0x01, polls interrupt-IN)
+src/usb_host/usb_host.c            usbh_init/enable; USBH_CONTROLLER_DEFINE bound to &usb_otg
+src/input/xinput_map.c             XInput 20-byte report -> Pro2 HID back buffer (+ hid_commit)
+include/input/xinput.h, include/usb_host.h
+```
+
+Data path: pad → `uhc_dwc2_esp32` (UHC) → Zephyr USBH stack → `xinput_class` (claims the gamepad
+interface, submits an interrupt-IN poll) → `xinput_map_report()` → `g_hid_controller` back buffer
+→ existing HID report thread → NS2. `main.c` calls `xinput_host_start()` **after** BLE init so a
+USB failure can't block the load-bearing BLE path. The UHC driver is single-active (one channel
+runs one `uhc_transfer` at a time, the model the UHC layer is built around — cf. `uhc_max3421e`).
+
+**Build wiring (load-bearing — the host HAL is NOT compiled by default):**
+- `CONFIG_UHC_DWC2=y` (app symbol in `Kconfig.dwc2`) makes hal_espressif compile `usb_wrap_hal.c`
+  — its `zephyr/esp32s3/CMakeLists.txt:~295` already gates on this exact symbol.
+- `CMakeLists.txt` additionally pulls the host HAL sources the module still doesn't compile:
+  `esp_hal_usb/{usb_dwc_hal.c, usb_serial_jtag_hal.c, ${SOC}/usb_dwc_periph.c}` +
+  `esp_hw_support/usb_phy/usb_phy.c` (via `${ZEPHYR_HAL_ESPRESSIF_MODULE_DIR}`), and adds private
+  include dirs `${ZEPHYR_BASE}/drivers/usb/uhc` + `${ZEPHYR_BASE}/subsys/usb/host` (uhc_common.h /
+  usbh_device.h / usbh_class.h — the same private headers the in-tree UVC host class uses).
+- `app.overlay` enables `&usb_otg` (its `espressif,esp32-usb-otg` binding includes `snps,dwc2.yaml`
+  → reg/interrupts/clocks; UDC device mode stays off so nothing else binds it). PHY is brought up
+  in host mode via `usb_new_phy({CTRL_OTG, TARGET_INT, OTG_MODE_HOST, SPEED_FULL})`.
+
+**Status: VERIFIED working end-to-end on hardware** (ESP32-S3-DevKitC-1 + a wired XInput pad,
+2026-06-26): the pad enumerates, the class driver binds it, interrupt-IN reports flow with valid
+data, and pressing buttons / moving sticks drives the NS2's on-screen controller — all while BLE
+stays paired at security level 4. Builds clean under `-Werror` (twister green).
+
+### Load-bearing transfer-engine fixes (hard-won on hardware — DO NOT regress)
+Each was found by capturing the failing flow over serial and cross-checking the ESP-IDF HCD
+(vendored in the upstream at `…/managed_components/espressif__usb/src/hcd_dwc.c`):
+1. **250 ms connect debounce** (`UHC_DWC2_DEBOUNCE_MS`). At 25 ms the device wasn't stably attached,
+   the port never enabled after reset (`port_en` stayed 0) and every transfer timed out. ESP-IDF
+   uses `CONFIG_USB_HOST_DEBOUNCE_DELAY_MS=250`. **This was THE blocker for enumeration.**
+2. **30 ms host-mode init delay** (`UHC_DWC2_INIT_DELAY_MS`) after `usb_dwc_hal_init` — the HAL
+   contract ("≥25 ms before host mode takes effect"; ESP-IDF `INIT_DELAY_MS=30`).
+3. **Synchronous bus reset** — `uhc_dwc2_bus_reset()` polls `usb_dwc_hal_decode_intr()` for the
+   port-enable and configures the channel inline, rather than relying on the async ENABLED interrupt
+   (which the worker, blocked on the driver lock during the reset, can miss).
+4. **Periodic frame-list scheduling** for the interrupt endpoint: `usb_dwc_hal_port_set_frame_list`
+   + `usb_dwc_hal_port_periodic_enable` after port-enable, and `ep_char.periodic.interval`; the
+   periodic descriptor-list length is `FRAME_LIST_LEN` (32) vs 3 for control. Without this the INTR
+   channel is never serviced.
+5. **Reconfigure the channel only on target change** (`cur_ep`/`cur_addr`/`cur_mps`). Re-running
+   `set_ep_char` / resetting the DATA toggle on every interrupt re-poll dropped the endpoint from the
+   periodic schedule and corrupted DATA0/DATA1 — the pad delivered exactly one report then stalled.
+
+### Reproduce / verify on hardware
+1. Power the pad onto the native USB-C (OTG) VBUS externally (see VBUS below) and attach it.
+2. Flash @460800; confirm NS2 pairing still reaches level 4 (BLE is the load-bearing invariant).
+3. Serial shows `XInput controller bound (iface…ep…mps…)`; press buttons → the NS2 responds.
+
+### Known characteristics / follow-ups
+- **Idle report rate is modest** (~tens/s): the engine is single-active and re-arms each interrupt
+  transfer through a full completion → class-cb → re-enqueue round trip (one-shot QTD + HOC halt per
+  report). Button/stick *changes* register promptly (XInput reports on change). For a high steady
+  rate, move to a continuous multi-buffer periodic poll (the ESP-IDF HCD scheme) — clean follow-up.
+- **VBUS (hardware):** the internal PHY host mode does NOT source VBUS, and the DevKitC native USB-C
+  VBUS is Schottky-isolated from 5 V — so the pad gets no power and never enumerates (LEDs dark). No
+  firmware fix on a stock DevKitC: power the pad externally / direct-attach it (power-injecting OTG
+  cable, or wire 5 V to the OTG VBUS; D+=GPIO20/D-=GPIO19). **Zephyr USBH has no hub support** — the
+  pad must be on the root port, so a powered hub will NOT work. If a GPIO load switch is added, set
+  `usb_phy` `otg_io_conf.drvvbus_io_num` to drive it.
+- **IN transfer-size MPS rounding:** `uhc_dwc2_begin_stage()` passes `net_buf_tailroom` as the IN
+  length verbatim (not rounded to MPS) — fine for the 8/64-byte control + 32-byte interrupt reads
+  here; round up if a future endpoint misbehaves.
+- **XInput mapping cross-validated against the proven upstream** (`xinput_host.c`): 0xFF/0x5D/0x01
+  match, 20-byte report (type 0x00 / len 0x14), stick scale `(v+32768)>>4`, physical-position face
+  map, triggers→digital ZL/ZR, **no stick-axis inversion** (`XINPUT_INVERT_L/RY` default 0). No
+  controller init/LED command needed. Tunables in `xinput_map.c`: trigger threshold, optional stick
+  deadzone, physical-vs-label button map.
+- **Scope:** Xbox 360 XInput protocol only (20-byte report); Xbox One/Series (GIP) out of scope.
+- **Scope:** Xbox 360 XInput protocol only (20-byte report); Xbox One/Series (GIP) is out of scope.
+
 ## Current state & known gaps
 
-- **Host input is inert by design.** The EasyCon protocol layer was removed; the generic router
-  (`protocol.h` / `protocol_router.c`) is kept as the extension point but nothing is wired, so
-  the UART transport drains bytes into the RX ring and nothing decodes them. To make it a usable
-  input device, add a `protocol_instance_t` and assign `g_protocol_inst` in `transport.c`.
+- **Host input now comes from USB host / XInput** (see that section). The byte-oriented
+  `transport`/`protocol` path (UART + `protocol_router.c`) is bypassed (`CONFIG_TRANSPORT_LAYER_NONE`):
+  XInput delivers structured reports straight into the HID engine, not a byte stream. The generic
+  router is still the extension point if a byte-stream protocol is ever wired (`g_protocol_inst`
+  in `transport.c`).
 - `transport_uart.c` uses `DT_CHOSEN(zephyr_console)` — it shares the console UART. Add a
   `zephyr,joy-bridge-uart` chosen node in `app.overlay` before relying on host input + logs at
   the same time.

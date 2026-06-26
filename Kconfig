@@ -95,3 +95,8 @@ source "subsys/logging/Kconfig.template.log_config"
 endmenu
 
 source "Kconfig.zephyr"
+
+# joy_bridge USB host (XInput) symbols. Sourced last so it can depend on the
+# Zephyr UHC_DRIVER / USB_HOST_STACK symbols pulled in by Kconfig.zephyr.
+# rsource: resolve relative to this file's dir (the app), not $srctree.
+rsource "Kconfig.dwc2"
