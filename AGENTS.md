@@ -6,8 +6,9 @@ BLE. Target board: `esp32s3_devkitc/esp32s3/procpu`.
 
 **Status:** pairs with a real NS2 — the controller appears on Change Grip/Order,
 security level 4, HID reports flow — and auto-reconnects to a paired NS2 after a
-power-cycle (stored bond, level 4, no re-pair). The host-input path is
-intentionally inert (see *Current state*).
+power-cycle (stored bond, level 4, no re-pair). Host input is a wired **XInput
+(Xbox) controller over USB host**, mapped onto the Pro2 — verified working
+end-to-end on hardware (see *USB host / XInput controller input*).
 
 Upstream reference project: `/Users/alan/Projects/ESP32-BLE5-NSController-Emulator`.
 
