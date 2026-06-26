@@ -12,10 +12,11 @@
  * as SETUP/DATA/STATUS channel activations; bulk/interrupt as a single data
  * stage, using scatter/gather DMA QTDs.
  *
- * Status: builds and is structurally complete, but the transfer engine is NOT
- * yet hardware-verified (see the HW bring-up notes in AGENTS.md). Known bring-up
- * items: IN transfer-size MPS rounding, periodic (frame-list) scheduling for
- * interrupt endpoints, and DMA-buffer cache placement. Full-Speed only.
+ * Status: verified working end-to-end on hardware (ESP32-S3-DevKitC-1 + a wired
+ * XInput pad; see AGENTS.md). Periodic (frame-list) scheduling for interrupt
+ * endpoints is implemented below. Full-Speed only. Remaining bring-up note: IN
+ * transfers pass net_buf tailroom verbatim (not rounded up to MPS) — fine for
+ * the control/interrupt endpoints used here.
  */
 
 #define DT_DRV_COMPAT espressif_esp32_usb_otg

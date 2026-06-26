@@ -64,10 +64,15 @@ static void pro2_report_init(controller_hid_report_t *report) {
     if (report == NULL) return;
 
     report->type = CONTROLLER_TYPE_PRO2;
-    report->report = (hid_report_pro2_t *)malloc(sizeof(hid_report_pro2_t));
+    /* Reuse an existing allocation on re-init (hid_reset) instead of leaking the
+     * previous report buffer. report->report is NULL on first init (the owning
+     * controller_hid_report_t is zeroed by the caller). */
     if (report->report == NULL) {
-        ESP_LOGE(LOG_HID, "Failed to allocate memory for pro2 controller report");
-        return;
+        report->report = (hid_report_pro2_t *)malloc(sizeof(hid_report_pro2_t));
+        if (report->report == NULL) {
+            ESP_LOGE(LOG_HID, "Failed to allocate memory for pro2 controller report");
+            return;
+        }
     }
     memset(report->report, 0, sizeof(hid_report_pro2_t));
 

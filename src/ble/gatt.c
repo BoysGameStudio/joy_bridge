@@ -190,7 +190,9 @@ static ssize_t write_cmd(struct bt_conn *conn, const struct bt_gatt_attr *attr,
     pro2_gatt_rsp_t rsp = { .cmd = data_buf[0], .subcmd = data_buf[3],
                             .rsp_data = NULL, .rsp_len = 0 };
 
-    int rc = cmd_process(&rsp, data_buf, len);
+    /* Pass the post-header payload length (data_buf = buf + NS2_DATA_EMPTY_LEN),
+     * not the raw ATT write length, so handlers can bounds-check their reads. */
+    int rc = cmd_process(&rsp, data_buf, len - NS2_DATA_EMPTY_LEN);
     /* One concise INFO line per command so the cmd-0x15 pairing flow stays
      * visible without heavy per-packet logging. */
     ESP_LOGI(LOG_BLE_GATT, "cmd 0x%02x/0x%02x wlen=%u -> rc=%d rsp_len=%u",

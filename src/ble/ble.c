@@ -235,6 +235,9 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
 /* Called by gatt.c on HID-input CCC change: start/stop the report thread. */
 void ble_on_hid_subscription(bool enabled) {
     if (enabled) {
+        /* Stop any running report thread before re-initialising the buffers, so
+         * hid_reset never races a live reader, then (re)start it. */
+        g_hid_controller.ops->stop_task(&g_hid_controller);
         g_hid_controller.ops->hid_reset(&g_hid_controller);
         g_hid_controller.ops->start_task(&g_hid_controller);
     } else {

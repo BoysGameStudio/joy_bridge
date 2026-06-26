@@ -13,9 +13,9 @@
  * peripheral serves it on the controller's LE LTK request regardless of which
  * lookup SMP performs, then persist with bt_keys_store().
  *
- * NOTE (needs on-hardware validation): the exact key *type* NS2 expects is not
- * certain; we set LTK + LTK_P256 (+ PERIPH_LTK) to cover SC and legacy. If NS2
- * rejects encryption, narrow this to the type its handshake actually uses.
+ * We set LTK + LTK_P256 (+ legacy PERIPH_LTK) to cover both the SC and legacy
+ * lookups SMP may perform. Verified on hardware: an already-paired NS2
+ * re-establishes encryption at security level 4 with no fresh SMP exchange.
  */
 
 #include <string.h>

@@ -67,11 +67,15 @@ static bool xinput_find_in_ep(struct usb_device *udev, uint8_t iface,
 	while (off + sizeof(struct usb_desc_header) <= total) {
 		const struct usb_desc_header *h = (const void *)(p + off);
 
-		if (h->bLength < sizeof(struct usb_desc_header)) {
+		/* Stop on a too-short header or a descriptor whose claimed length runs
+		 * past the configuration buffer. */
+		if (h->bLength < sizeof(struct usb_desc_header) ||
+		    off + h->bLength > total) {
 			break;
 		}
 
-		if (h->bDescriptorType == USB_DESC_INTERFACE) {
+		if (h->bDescriptorType == USB_DESC_INTERFACE &&
+		    h->bLength >= sizeof(struct usb_if_descriptor)) {
 			const struct usb_if_descriptor *id = (const void *)(p + off);
 			bool is_xinput = (id->bInterfaceClass == XINPUT_IF_CLASS &&
 					  id->bInterfaceSubClass == XINPUT_IF_SUBCLASS &&
@@ -80,7 +84,8 @@ static bool xinput_find_in_ep(struct usb_device *udev, uint8_t iface,
 			in_target = (iface == USBH_CLASS_IFNUM_DEVICE)
 					    ? is_xinput
 					    : (id->bInterfaceNumber == iface);
-		} else if (in_target && h->bDescriptorType == USB_DESC_ENDPOINT) {
+		} else if (in_target && h->bDescriptorType == USB_DESC_ENDPOINT &&
+			   h->bLength >= sizeof(struct usb_ep_descriptor)) {
 			const struct usb_ep_descriptor *ep = (const void *)(p + off);
 
 			if ((ep->bEndpointAddress & USB_EP_DIR_IN) &&
@@ -125,9 +130,16 @@ static int xinput_in_cb(struct usb_device *udev, struct uhc_transfer *xfer)
 		}
 	}
 
-	/* Stop re-arming if the device is going away. */
+	/* Stop re-arming on a terminal condition: device going away, or the endpoint
+	 * stalled (-EPIPE) — re-submitting a halted endpoint without a CLEAR_FEATURE
+	 * (not issued here) would just immediately re-stall. Transient errors fall
+	 * through and the interrupt poll is re-armed. */
 	if (xfer->err == -ECONNRESET || xfer->err == -ESHUTDOWN ||
-	    xfer->err == -ENODEV) {
+	    xfer->err == -ENODEV || xfer->err == -EPIPE) {
+		if (xfer->err == -EPIPE) {
+			LOG_WRN("XInput IN endpoint stalled; stopping poll");
+			inst->running = false;
+		}
 		return 0;
 	}
 

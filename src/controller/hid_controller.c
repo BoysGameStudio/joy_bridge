@@ -61,7 +61,20 @@ static void controller_task(void *p1, void *p2, void *p3) {
                 continue;
             }
 
-            /* Swap front/back buffers if a commit was requested. */
+            size_t report_size = ctrl->hid_ops->report_size();
+            uint8_t report_buffer[sizeof(hid_report_pro2_t)];
+            if (report_size > sizeof(report_buffer)) {
+                ESP_LOGE(LOG_HID, "report size %zu exceeds buffer", report_size);
+                k_msleep(HID_REPORT_INTERVAL);
+                continue;
+            }
+
+            /* Swap front/back if a commit was requested. k_sched_lock makes the
+             * three-pointer swap atomic against the writer's get_back_buffer()
+             * read, so it can never observe the half-swapped state and write the
+             * buffer being read (single-core; no blocking call inside). The
+             * barriers order the writer's buffer stores vs. swap_request. */
+            k_sched_lock();
             if (ctrl->buffer.swap_request) {
                 MEMORY_BARRIER();
                 controller_hid_report_t *temp = ctrl->buffer.front_buffer;
@@ -70,11 +83,8 @@ static void controller_task(void *p1, void *p2, void *p3) {
                 MEMORY_BARRIER();
                 ctrl->buffer.swap_request = 0;
             }
+            k_sched_unlock();
 
-            size_t report_size = ctrl->hid_ops->report_size();
-
-            /* Copy out before a potential swap to keep the report consistent. */
-            uint8_t report_buffer[report_size];
             uint8_t *next_report = ctrl->hid_ops->next_report(ctrl->buffer.front_buffer);
             memcpy(report_buffer, next_report, report_size);
 

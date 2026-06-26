@@ -34,16 +34,3 @@ int aes128_ecb(const uint8_t *key, const uint8_t *in, uint8_t *out) {
     }
     return rc;
 }
-
-uint8_t peek_byte(uint8_t *head, uint32_t head_len,
-                  uint8_t *wrap, uint32_t wrap_len,
-                  uint32_t idx) {
-    if (idx < head_len) {
-        return head[idx];
-    }
-    idx -= head_len;
-    if (idx < wrap_len) {
-        return wrap[idx];
-    }
-    return 0;
-}

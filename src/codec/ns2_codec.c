@@ -195,9 +195,12 @@ static uint8_t cmd_0x01_handler(const uint8_t subcmd, const uint16_t payload_len
 /* Flash Memory cmd handler */
 static uint8_t cmd_0x02_handler(const uint8_t subcmd, const uint16_t payload_len,
                                 const uint8_t *data_in, uint8_t *data_out) {
-    (void)payload_len;
     switch (subcmd) {
         case 0x04: {
+            if (payload_len < 15) {
+                ESP_LOGE(LOG_APP, "cmd 0x02/0x04 payload too short: %u", payload_len);
+                return 0x00;
+            }
             uint32_t mem_addr = (data_in[14] << 16) | (data_in[13] << 8) | data_in[12];
             size_t read_len = data_in[8];
             /* The response is an 8-byte header + read_len bytes written into the
@@ -234,7 +237,9 @@ static uint8_t cmd_0x03_handler(const uint8_t subcmd, const uint16_t payload_len
         case 0x07:
 #ifdef CONFIG_MCU_DEBUG
             ESP_LOGD(LOG_APP, "0x03 0x07 cmd, ns2 send ltk");
-            log_print_ltk_hex("LTK", data_in + 8 + 6);
+            if (payload_len >= 8 + 6 + LTK_KEY_SIZE) {
+                log_print_ltk_hex("LTK", data_in + 8 + 6);
+            }
 #endif
             return 0x00;
         default:
@@ -351,9 +356,12 @@ static uint8_t cmd_0x11_handler(const uint8_t subcmd, const uint16_t payload_len
 /* Bluetooth Pairing cmd handler */
 static uint8_t cmd_0x15_handler(const uint8_t subcmd, const uint16_t payload_len,
                                 const uint8_t *data_in, uint8_t *data_out) {
-    (void)payload_len;
     switch (subcmd) {
         case 0x01: {
+            if (payload_len < 10 + ESP_BD_ADDR_LEN) {
+                ESP_LOGE(LOG_APP, "cmd 0x15/0x01 payload too short: %u", payload_len);
+                return 0x00;
+            }
             uint8_t mac_addr[ESP_BD_ADDR_LEN] = {0x00};
             memcpy(mac_addr, data_in + 10, ESP_BD_ADDR_LEN);
             if (memcmp(g_console_ns2.ble_addr.val, mac_addr, ESP_BD_ADDR_LEN) == 0) {
@@ -371,6 +379,10 @@ static uint8_t cmd_0x15_handler(const uint8_t subcmd, const uint16_t payload_len
             return 0x00;
         }
         case 0x04: {
+            if (payload_len < 9 + LTK_KEY_SIZE) {
+                ESP_LOGE(LOG_APP, "cmd 0x15/0x04 payload too short: %u", payload_len);
+                return 0x00;
+            }
             uint8_t ltk_A1[LTK_KEY_SIZE] = {0x00};
             memcpy(ltk_A1, data_in + 9, LTK_KEY_SIZE);
             log_print_ltk_hex("LTK A1:", ltk_A1);
@@ -386,6 +398,10 @@ static uint8_t cmd_0x15_handler(const uint8_t subcmd, const uint16_t payload_len
             return LTK_KEY_SIZE + 1;
         }
         case 0x02: {
+            if (payload_len < 9 + LTK_KEY_SIZE) {
+                ESP_LOGE(LOG_APP, "cmd 0x15/0x02 payload too short: %u", payload_len);
+                return 0x00;
+            }
             uint8_t data_A2[LTK_KEY_SIZE] = {0x00};
             uint8_t data_A2_re[LTK_KEY_SIZE] = {0x00};
             uint8_t data_B2[LTK_KEY_SIZE] = {0x00};
@@ -412,10 +428,14 @@ static uint8_t cmd_0x15_handler(const uint8_t subcmd, const uint16_t payload_len
             return 0x00;
         }
         case 0x03: {
+            if (payload_len < 10) {
+                ESP_LOGE(LOG_APP, "cmd 0x15/0x03 payload too short: %u", payload_len);
+                return 0x00;
+            }
             if (data_in[8] == 0x00 || data_in[9] == 0x00) {
-                int rc = controller_pairing_info_save();
-                rc += inject_pairing_info_to_ble_ctx();
-                if (rc == 0) {
+                int save_rc = controller_pairing_info_save();
+                int inject_rc = inject_pairing_info_to_ble_ctx();
+                if (save_rc == 0 && inject_rc == 0) {
                     data_out[0] = 0x01;
                     return 0x01;
                 }
@@ -504,8 +524,6 @@ cmd_handler cmd_handler_find(uint8_t cmd) {
     HASH_FIND(hh, g_cmd_handlers, &cmd, sizeof(uint8_t), cur);
     return cur != NULL ? cur->handler : NULL;
 }
-
-#define CMD_PROCESS_MAX_RSP_DATA_LEN 0x78
 
 int cmd_process(pro2_gatt_rsp_t *rsp, uint8_t *data_in, uint16_t payload_len) {
     uint8_t rsp_magic[4] = {0x10, 0x78, 0x00, 0x00};
