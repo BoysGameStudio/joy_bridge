@@ -1,3 +1,12 @@
+/*
+ * Board-specific devicetree overlay for esp32s3_devkitc.
+ *
+ * Zephyr auto-applies boards/<board>.overlay when this board is the build
+ * target (BOARD=esp32s3_devkitc/esp32s3/procpu), so this file needs no CMake
+ * wiring. It holds the DevKitC-1 flash/PSRAM layout and the USB-OTG host-mode
+ * bring-up for the XInput controller bridge.
+ */
+
 /* 1. Expand total physical flash size to 16 MB */
 &flash0 {
     reg = <0x0 DT_SIZE_M(16)>;

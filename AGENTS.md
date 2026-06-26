@@ -130,7 +130,7 @@ runs one `uhc_transfer` at a time, the model the UHC layer is built around — c
   `esp_hw_support/usb_phy/usb_phy.c` (via `${ZEPHYR_HAL_ESPRESSIF_MODULE_DIR}`), and adds private
   include dirs `${ZEPHYR_BASE}/drivers/usb/uhc` + `${ZEPHYR_BASE}/subsys/usb/host` (uhc_common.h /
   usbh_device.h / usbh_class.h — the same private headers the in-tree UVC host class uses).
-- `app.overlay` enables `&usb_otg` (its `espressif,esp32-usb-otg` binding includes `snps,dwc2.yaml`
+- `boards/esp32s3_devkitc_procpu.overlay` enables `&usb_otg` (its `espressif,esp32-usb-otg` binding includes `snps,dwc2.yaml`
   → reg/interrupts/clocks; UDC device mode stays off so nothing else binds it). PHY is brought up
   in host mode via `usb_new_phy({CTRL_OTG, TARGET_INT, OTG_MODE_HOST, SPEED_FULL})`.
 
@@ -201,6 +201,11 @@ Each was found by capturing the failing flow over serial and cross-checking the 
 ## Gotchas
 
 - **Flash baud:** 921600 fails; use 460800/115200 (see *Build / flash / test*).
+- **Board overlay naming:** the devicetree overlay is `boards/esp32s3_devkitc_procpu.overlay`.
+  The `_procpu` qualifier suffix is REQUIRED for Zephyr to auto-discover it on this HWMv2 board —
+  a bare `esp32s3_devkitc.overlay` (or a top-level `app.overlay`) is silently ignored and the
+  build falls back to board defaults (4 MB flash map, USB-OTG disabled). Confirm it took via the
+  `/* in …overlay */` provenance comments in `build/zephyr/zephyr.dts`.
 - **Flaky USB-serial auto-reset:** RTS/DTR toggling on `/dev/cu.usbserial-3120` can drop the
   board into download mode (`boot:0x0`). Recover with
   `esptool --port /dev/cu.usbserial-3120 --after hard-reset flash-id` (returns it to RUN +
