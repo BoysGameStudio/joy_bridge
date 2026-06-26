@@ -257,9 +257,23 @@ static bool on_le_param_req(struct bt_conn *conn, struct bt_le_conn_param *param
 
 static void on_le_param_updated(struct bt_conn *conn, uint16_t interval,
                                 uint16_t latency, uint16_t timeout) {
-    ARG_UNUSED(conn);
     ESP_LOGI(LOG_BLE_GAP, "conn params updated: interval=%u (%u.%02u ms) latency=%u timeout=%u",
              interval, (interval * 5) / 4, ((interval * 5) % 4) * 25, latency, timeout);
+#if defined(CONFIG_BT_SMP) && CONFIG_JOY_BRIDGE_BLE_FAST_CONN_INTERVAL > 0
+    /* NS2 connects at ~5 ms but unilaterally downgrades to a ~30 ms power-save
+     * interval a few seconds in (observed on hardware), and nothing watches for
+     * it — so the link is stuck slow and input lags. Whenever the interval
+     * regresses above our target, re-arm the fast-interval request to pull it
+     * back down. Gated on L4 so it can never fire during the pairing handshake
+     * (pushing a sub-spec interval mid-handshake can destabilise pairing). */
+    if (interval > CONFIG_JOY_BRIDGE_BLE_FAST_CONN_INTERVAL &&
+        bt_conn_get_security(conn) >= BT_SECURITY_L4) {
+        fast_interval_attempts = 0;
+        k_work_reschedule(&fast_interval_work, K_MSEC(1000));
+    }
+#else
+    ARG_UNUSED(conn);
+#endif
 }
 
 #if defined(CONFIG_BT_SMP)
