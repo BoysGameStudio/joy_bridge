@@ -70,12 +70,9 @@ Source layout
    include/            public headers (mirrors upstream main/include)
    src/
      app/        device state, utils, logging shim
-     buffer/     zero-copy ring buffer
      controller/ HID report engine (pro2)
      codec/      NS2 codec (ns2_codec / pro2 / ns2)
-     protocol/   generic input-protocol router (unused; extension point)
      ble/        Zephyr bt host glue (ble / gatt / ble_store)
-     transport/  UART backend (not the input source; see usb_host/)
      storage/    settings-backed persistence
      input/      XInput -> Pro2 report mapping
      usb_host/   native DWC2 USB host driver + USBH XInput class driver

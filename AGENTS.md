@@ -40,20 +40,19 @@ export ZEPHYR_SDK_INSTALL_DIR=/Users/alan/Zephyr/zephyr-sdk-1.0.1
 include/   mirrors upstream main/include
 src/
   app/        device state, utils, log shim
-  buffer/     zero-copy SPSC ring buffer
   controller/ HID report engine (k_thread + double buffer)
   codec/      NS2 app protocol (ns2_codec / pro2 / ns2)
-  protocol/   generic input-protocol router (no protocol wired)
   ble/        Zephyr bt host glue (ble / gatt / ble_store)
-  transport/  UART backend + dispatcher
   storage/    settings-backed persistence
+  usb_host/   native ESP32-S3 UHC (DWC2) driver + USBH XInput class driver
+  input/      XInput report -> Pro2 HID mapping
 ```
 
 ## Architecture invariants (keep these)
 
 - **Logging:** ESP_LOGx → Zephyr LOG via `include/app_log.h` shim. Every `.c` that logs must
   `LOG_MODULE_REGISTER(jb_<name>, …)` *before* including `app_log.h`.
-- **Portable core stays host-agnostic:** controller / codec / protocol / buffer never include
+- **Portable core stays host-agnostic:** controller / codec never include
   `<zephyr/bluetooth/*>`; they go through `include/ble/ble_iface.h`. All NimBLE→Zephyr glue is
   confined to `src/ble/`.
 - FreeRTOS → `k_thread` / `k_msleep`; NVS → `include/storage.h` over the settings subsys;
@@ -101,8 +100,8 @@ sub-spec path.
 
 The bridge's input source: a wired **XInput (Xbox 360 protocol)** controller plugged into the
 ESP32-S3 USB-OTG port drives the emulated Pro2. Built when `CONFIG_JOY_BRIDGE_USB_XINPUT=y`
-(default in `prj.conf`, which also sets the transport layer to NONE — XInput replaces the inert
-UART host-input path).
+(default in `prj.conf`). XInput delivers structured reports straight into the HID engine, so
+there is no separate byte-stream input transport.
 
 **Why it's a from-scratch driver:** upstream Zephyr has **no DWC2 host (UHC) driver** for the S3
 OTG core (`drivers/usb/uhc/` ships only max3421e / NXP mcux / virtual). XInput is also
@@ -183,19 +182,15 @@ Each was found by capturing the failing flow over serial and cross-checking the 
   map, triggers→digital ZL/ZR, **no stick-axis inversion** (`XINPUT_INVERT_L/RY` default 0). No
   controller init/LED command needed. Tunables in `xinput_map.c`: trigger threshold, optional stick
   deadzone, physical-vs-label button map.
-- **Scope:** Xbox 360 XInput protocol only (20-byte report); Xbox One/Series (GIP) out of scope.
 - **Scope:** Xbox 360 XInput protocol only (20-byte report); Xbox One/Series (GIP) is out of scope.
 
 ## Current state & known gaps
 
-- **Host input now comes from USB host / XInput** (see that section). The byte-oriented
-  `transport`/`protocol` path (UART + `protocol_router.c`) is bypassed (`CONFIG_TRANSPORT_LAYER_NONE`):
-  XInput delivers structured reports straight into the HID engine, not a byte stream. The generic
-  router is still the extension point if a byte-stream protocol is ever wired (`g_protocol_inst`
-  in `transport.c`).
-- `transport_uart.c` uses `DT_CHOSEN(zephyr_console)` — it shares the console UART. Add a
-  `zephyr,joy-bridge-uart` chosen node in `app.overlay` before relying on host input + logs at
-  the same time.
+- **Host input comes from USB host / XInput** (see that section): the pad's structured reports
+  feed straight into the HID engine. There is no byte-stream input transport — the previously
+  inert UART `transport` / `protocol_router` / ring-buffer scaffold has been removed. If a
+  byte-stream host protocol is ever needed, add a parser that writes into `g_hid_controller`'s
+  back buffer the way `src/input/xinput_map.c` does.
 - Auto-reconnect to a paired NS2 is verified working (stored bond → security level 4 with no
   cmd-0x15 re-key). It requires `pro2_host_addr_init()` (pro2.c) to restore the saved NS2
   console address on boot; without it the wake-adv payload and the injected LTK bond

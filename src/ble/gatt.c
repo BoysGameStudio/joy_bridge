@@ -7,12 +7,11 @@
  *   - 0x0016  command write      (WRITE_NO_RSP)  -> cmd_process() -> notify 0x001e
  *   - 0x001e  command response    (NOTIFY)
  *
- * SKELETON TODOs:
- *   - Upstream also exposes per-characteristic vendor descriptors (UUID
- *     679d5510-… / b746df8c-…). Only the CCC descriptors needed for notify are
- *     defined here; add the vendor descriptors if NS2 requires them.
- *   - The READ characteristics return the upstream constant payloads; dynamic
- *     reads (0x000a/0x0026/0x002e) return empty for now.
+ * The per-characteristic vendor descriptors (679d5510-… on the R/N chars,
+ * b746df8c-… on the N chars) are defined here too — they are load-bearing for
+ * the exact Pro2 handle layout NS2 requires (see the table notes below).
+ * The READ characteristics return the upstream constant payloads; the dynamic
+ * reads (0x000a/0x0026/0x002e) return empty, which NS2 pairing never exercises.
  */
 
 #include <zephyr/kernel.h>

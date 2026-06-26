@@ -2,7 +2,7 @@
  * Key/value persistence backed by the Zephyr settings subsystem. Replaces the
  * upstream ESP-IDF NVS usage. Keys are stored as "jb/<namespace>/<key>".
  *
- * NOTE (scaffold): erase_namespace deletes the specific keys this app manages
+ * NOTE: erase_namespace deletes the specific keys this app manages
  * under a namespace; a generic subtree wipe would need a load-handler that
  * enumerates children. The set we use (ltk / host / ctrl addr) is covered.
  */

@@ -7,7 +7,6 @@
 
 #include "device.h"
 #include "controller/hid_controller.h"
-#include "transport/transport.h"
 #include "storage.h"
 #include "usb_host.h"
 
@@ -22,18 +21,6 @@ int main(void) {
     /* Persistent storage (settings) for controller config + pairing info. */
     if (storage_init() != 0) {
         ESP_LOGE(LOG_APP, "Storage init failed; continuing without persistence");
-    }
-
-    /* Transport layer (host -> controller input). */
-    if (transport_init() == 0) {
-        ESP_LOGI(LOG_APP, "Transport initialized");
-        if (transport_start() == 0) {
-            ESP_LOGI(LOG_APP, "Transport protocol task started");
-        } else {
-            ESP_LOGE(LOG_APP, "Failed to start transport protocol task");
-        }
-    } else {
-        ESP_LOGE(LOG_APP, "Failed to init transport, continuing without host input");
     }
 
     /* Controller type + firmware/pairing data from storage. */

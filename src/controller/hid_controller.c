@@ -88,8 +88,8 @@ static void controller_task(void *p1, void *p2, void *p3) {
             }
         }
 
-        /* TODO: for jitter-free cadence use an absolute periodic schedule
-         * (k_timer / k_uptime delta); a fixed sleep is adequate for scaffold. */
+        /* A fixed sleep is adequate here; for jitter-free cadence switch to an
+         * absolute periodic schedule (k_timer / k_uptime delta). */
         k_msleep(HID_REPORT_INTERVAL);
     }
 }

@@ -23,32 +23,6 @@ config SAVE_PAIRING_INFO
 	  Persist pairing information (LTK / peer address) to non-volatile
 	  storage for automatic reconnection on next boot.
 
-choice TRANSPORT_LAYER_CHOICE
-	prompt "Transport Layer"
-	default TRANSPORT_LAYER_UART
-	help
-	  Physical transport that feeds controller input into the emulator.
-
-config TRANSPORT_LAYER_UART
-	bool "UART"
-	help
-	  Use a UART (selected via the devicetree chosen node
-	  "zephyr,joy-bridge-uart", falling back to the console UART) for the
-	  host->controller byte stream.
-
-config TRANSPORT_LAYER_NONE
-	bool "None (no host input)"
-	help
-	  Build without an input transport. The BLE controller emulation still
-	  runs; HID reports stay at their neutral/centered defaults. Useful while
-	  bringing up the BLE stack.
-
-endchoice
-
-config MAX_PROTOCOL_PARSERS
-	int "Maximum protocol parsers"
-	default 16
-
 config HID_REPORT_INTERVAL
 	int "HID Report Interval (ms)"
 	default 15
