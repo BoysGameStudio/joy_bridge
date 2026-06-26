@@ -96,6 +96,15 @@ is needed**; only on-hardware confirmation of the negotiated interval remains. `
 requests a param update when NS2's interval ≥ 6 units, avoiding a malformed `min>max` on the
 sub-spec path.
 
+**Post-connect downgrade (verified on hardware):** NS2 *reconnects* at 5 ms, then unilaterally
+renegotiates down to its ~30 ms power-save interval ~5 s after connecting and holds it — so input
+lags once connected even though the *initial* interval was fast. Fix:
+`CONFIG_JOY_BRIDGE_BLE_FAST_CONN_INTERVAL=4` (target 5 ms) + `on_le_param_updated()` re-arms the
+fast-interval request whenever the interval regresses above target (gated on L4 so it never
+perturbs the pairing handshake). NS2 accepts the re-request and holds 5 ms for the rest of the
+session — one re-request per session sufficed in testing. `fast_interval_work_fn()` self-stops once
+at/under target, so the re-arm is what catches the *later* downgrade.
+
 ## USB host / XInput controller input
 
 The bridge's input source: a wired **XInput (Xbox 360 protocol)** controller plugged into the
