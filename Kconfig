@@ -45,17 +45,13 @@ config JOY_BRIDGE_BLE_FAST_CONN_INTERVAL
 	int "Post-pairing fast connection interval (units of 1.25 ms; 0 = off)"
 	default 0
 	help
-	  EXPERIMENTAL, default off. After security level 4, request this connection
-	  interval from the NS2 to cut input latency (it connects at 15 ms / 66 Hz).
-	  Units of 1.25 ms; 6 = 7.5 ms. The NS2 OWNS the interval and answers a
-	  peripheral request unpredictably (verified on hardware): a spec-compliant
-	  request (6) sometimes makes it apply its preferred ~5 ms (interval=4,
-	  200 Hz — a big win), but at idle it sometimes applies a 30 ms power-save
-	  interval instead (worse than the 15 ms default); sub-spec requests (< 6)
-	  are rejected outright. With this off (0) the link never gets poked and
-	  stays a stable 15 ms. Enable (6) and judge during real gameplay for your
-	  setup. Requested only AFTER pairing (plus a settle), with a bounded retry;
-	  the negotiated result is logged by on_le_param_updated().
+	  After security level 4, request this connection interval from the NS2 to
+	  cut input latency. Units of 1.25 ms; 4 = 5 ms / 200 Hz (prj.conf sets 4).
+	  Verified on hardware: NS2 connects at 5 ms but power-saves to ~30 ms a few
+	  seconds later; on_le_param_updated() re-requests this value whenever the
+	  interval regresses above it, and NS2 then holds 5 ms. Requested only after
+	  pairing so it cannot perturb the handshake; the negotiated result is logged
+	  by on_le_param_updated(). 0 = never poke the link.
 
 config JOY_BRIDGE_SLEEP_ON_NS2_OFF
 	bool "Deep-sleep the ESP32 when the BLE link to the NS2 drops"

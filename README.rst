@@ -21,6 +21,12 @@ Status
 - **USB host / XInput input:** verified working end-to-end on hardware
   (ESP32-S3-DevKitC-1) — a wired XInput pad enumerates, binds, and drives the NS2
   while BLE stays paired at level 4.
+- **Low latency:** holds NS2's 5 ms / 200 Hz connection interval. NS2 power-saves
+  to ~30 ms a few seconds after connecting; the firmware re-requests 5 ms to pull
+  it back (``CONFIG_JOY_BRIDGE_BLE_FAST_CONN_INTERVAL``).
+- **NS2 sleep → deep sleep:** when the NS2 sleeps and the link drops, the bridge
+  deep-sleeps (~10 µA) instead of re-advertising (which would wake the console
+  back up). Tap BOOT to wake → reconnect (``CONFIG_JOY_BRIDGE_SLEEP_ON_NS2_OFF``).
 - Builds clean under ``-Werror`` (twister ``build_only`` suite).
 
 USB Host / XInput mode
@@ -60,7 +66,9 @@ NS2 drives a sub-spec ~5 ms interval. Both sides are handled:
   the real implementation comes from the blob's ``arch_main.o`` and the HAL no-op
   stub is not compiled for S3 — so no re-pin or un-stub is needed.
 
-See the header of ``src/ble/ble.c`` for the full trace.
+After connecting, NS2 power-saves to ~30 ms; ``on_le_param_updated()`` re-requests
+5 ms whenever the interval regresses, and NS2 then holds 5 ms (verified on
+hardware). See the header of ``src/ble/ble.c`` for the full trace.
 
 Source layout
 =============

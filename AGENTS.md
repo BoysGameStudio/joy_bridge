@@ -8,7 +8,9 @@ BLE. Target board: `esp32s3_devkitc/esp32s3/procpu`.
 security level 4, HID reports flow — and auto-reconnects to a paired NS2 after a
 power-cycle (stored bond, level 4, no re-pair). Host input is a wired **XInput
 (Xbox) controller over USB host**, mapped onto the Pro2 — verified working
-end-to-end on hardware (see *USB host / XInput controller input*).
+end-to-end on hardware (see *USB host / XInput controller input*). Holds NS2's
+5 ms / 200 Hz interval (re-requested after NS2's power-save downgrade) and
+deep-sleeps when the NS2 sleeps (BOOT-button wake) — both verified on hardware.
 
 Upstream reference project: `/Users/alan/Projects/ESP32-BLE5-NSController-Emulator`.
 
@@ -62,9 +64,10 @@ src/
 
 ## Load-bearing config — DO NOT regress
 
-NS2 connects at 15 ms, identically to upstream. Pairing was solved by THREE things; earlier
-5 ms-interval, controller-blob, and advertising theories were all **red herrings — don't
-re-investigate them**. Each fix is documented inline in `prj.conf` / `src/ble/gatt.c`.
+NS2 pairs at 15 ms, identically to upstream (the post-pairing 5 ms steady state is a separate
+concern — see *5 ms connection interval*). Pairing was solved by THREE things; earlier 5 ms-interval,
+controller-blob, and advertising theories were all **red herrings — don't re-investigate them**.
+Each fix is documented inline in `prj.conf` / `src/ble/gatt.c`.
 
 1. **Exact genuine-Pro2 GATT table (handles `0x0001`–`0x0032`).** In `src/ble/gatt.c`:
    services named `_0_svc_a` / `_0_svc_b` so `SORT_BY_NAME` places them *before* Zephyr's
@@ -96,14 +99,23 @@ is needed**; only on-hardware confirmation of the negotiated interval remains. `
 requests a param update when NS2's interval ≥ 6 units, avoiding a malformed `min>max` on the
 sub-spec path.
 
-**Post-connect downgrade (verified on hardware):** NS2 *reconnects* at 5 ms, then unilaterally
-renegotiates down to its ~30 ms power-save interval ~5 s after connecting and holds it — so input
-lags once connected even though the *initial* interval was fast. Fix:
-`CONFIG_JOY_BRIDGE_BLE_FAST_CONN_INTERVAL=4` (target 5 ms) + `on_le_param_updated()` re-arms the
-fast-interval request whenever the interval regresses above target (gated on L4 so it never
-perturbs the pairing handshake). NS2 accepts the re-request and holds 5 ms for the rest of the
-session — one re-request per session sufficed in testing. `fast_interval_work_fn()` self-stops once
+**Post-connect downgrade (verified on hardware):** NS2 reconnects at 5 ms, then power-saves to
+~30 ms ~5 s in and holds it — so input lags once connected. Fix:
+`CONFIG_JOY_BRIDGE_BLE_FAST_CONN_INTERVAL=4` (5 ms) + `on_le_param_updated()` re-requests it
+whenever the interval regresses above target (gated on L4 so it can't perturb pairing). NS2 then
+accepts and holds 5 ms; one re-request per session sufficed. `fast_interval_work_fn()` self-stops
 at/under target, so the re-arm is what catches the *later* downgrade.
+
+## NS2 sleep → deep sleep
+
+`CONFIG_JOY_BRIDGE_SLEEP_ON_NS2_OFF=y` (selects `POWEROFF`). On any BLE disconnect — NS2
+sleeping/powering off (HCI reason 0x13) or the link lost — `on_disconnected()` deep-sleeps the chip
+(`sys_poweroff()` → `esp_deep_sleep_start()`, ~10 µA) instead of re-advertising; re-advertising the
+wake packet would just wake the console back up. Wake source is the **BOOT button (GPIO0)** via ext1
+(`esp_sleep_enable_ext1_wakeup`, `ANY_LOW` — `ALL_LOW` is deprecated on S3 and fails `-Werror`); a
+tap reboots → re-advertise → reconnect. `log_panic()` flushes the deferred log before power-down
+(this build routes `printk` through the log backend, so logs drop in bursts otherwise). Verified on
+hardware: NS2 sleep → ~27 s of deep-sleep silence (console stayed asleep) → BOOT → reconnect.
 
 ## USB host / XInput controller input
 
