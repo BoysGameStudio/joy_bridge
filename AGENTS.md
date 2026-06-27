@@ -41,7 +41,7 @@ export ZEPHYR_SDK_INSTALL_DIR=/Users/alan/Zephyr/zephyr-sdk-1.0.1
 ```
 include/   mirrors upstream main/include
 src/
-  app/        device state, utils, log shim
+  app/        device state, utils, log shim, persistent event trace (trace.c)
   controller/ HID report engine (k_thread + double buffer)
   codec/      NS2 app protocol (ns2_codec / pro2 / ns2)
   ble/        Zephyr bt host glue (ble / gatt / ble_store)
@@ -178,6 +178,17 @@ Each was found by capturing the failing flow over serial and cross-checking the 
 5. **Reconfigure the channel only on target change** (`cur_ep`/`cur_addr`/`cur_mps`). Re-running
    `set_ep_char` / resetting the DATA toggle on every interrupt re-poll dropped the endpoint from the
    periodic schedule and corrupted DATA0/DATA1 — the pad delivered exactly one report then stalled.
+6. **Silent control-transfer retry** (`UHC_DWC2_XFER_MAX_RETRIES`, `uhc_dwc2_fail_or_retry()`).
+   Enumeration intermittently failed — `usbh_dev: Failed to read configuration 1 descriptor` on ~1-in-5
+   boots — from a transient excessive-transaction-error glitch (marginal VBUS) on the config-descriptor
+   control read; the host stack then frees the device and does NOT retry, so the pad never binds that
+   boot. On a non-STALL **control** error the driver now restarts the whole transfer from SETUP (resets
+   `xfer->stage` + `net_buf_reset` of any partial IN data), after a 5 ms settle, up to 3×; STALL
+   (`-EPIPE`) and the interrupt-IN poll path are never retried (leaves the report path untouched).
+   Re-activating the error-halted channel in place works (ESP-IDF's HCD does the same) — no hang.
+   **Measured on hardware: ~80% → 10/10 enumeration; the retry fires on ~half of boots and recovers on
+   the FIRST attempt** (it's a single transient transaction error, not sustained bad VBUS). DO NOT
+   regress. This masks the symptom; the *root* cause is still the VBUS delicacy below.
 
 ### Reproduce / verify on hardware
 1. Power the pad onto the native USB-C (OTG) VBUS externally (see VBUS below) and attach it.
@@ -251,6 +262,51 @@ JOY_BRIDGE log level ≥ INF. Macros live in `include/diag.h`; both compile to n
 cmd-`0x15` + level 4 (erase the bond first — see the script header — else you capture a silent
 reconnect). Example traces: `docs/ns2_pair_capture.txt` (fresh pair, full `0x15` exchange) and
 `docs/ns2_reconnect_capture.txt` (auto-reconnect, which skips `0x15`).
+
+## Persistent event trace (offline diagnostics)
+
+`CONFIG_JOY_BRIDGE_PERSIST_LOG=y` (on by default in `prj.conf`) records a curated, low-rate trace
+of significant runtime events to flash so the device's behaviour while running **offline** — on
+battery, with no serial console attached — can be reviewed after the fact. Captured (via `jb_trace()`
+calls co-located with the existing `LOG_*` lines, so live serial is unchanged): boot + reset cause,
+BLE connect (NS2 addr + interval), disconnect + HCI reason, security level, conn-interval updates,
+deep-sleep entry, and USB XInput bind/removal. `src/app/trace.c` + `include/trace.h`; compiles to
+nothing when the symbol is off (verified clean under `-Werror`).
+
+- **Never write flash inline — DO NOT REGRESS (hard-won on hardware).** Writing the on-chip SPI
+  flash stalls the XIP instruction cache for the duration of the write. During the **boot log-burst**
+  and the **NS2 pairing handshake** that corrupts the log backend (live console goes permanently
+  silent) and **breaks pairing (security never reaches L4)** — verified by isolating the writes on
+  hardware. A write once the link is *settled* (post-L4, HID flowing) is tolerated. So `jb_trace()`
+  only formats the line and pushes it to a small RAM ring (`PEND_SLOTS`); it does **no flash I/O** and
+  is safe from any context, including the BLE/USB callbacks during pairing. A low-priority worker
+  (`flush_thread_fn`, `K_LOWEST_APPLICATION_THREAD_PRIO`) drains the ring to flash every ~2 s **only
+  while `ble_hid_ready()`** (settled link), a few lines per cycle. `jb_trace_flush()` drains the ring
+  **synchronously before deep sleep** (link already down → safe), called in `ns2_sleep_work_fn` before
+  `log_panic()`. Cost: an abrupt power loss (battery yank) mid-session loses at most the last ~2 s of
+  unflushed events; a clean session end (NS2-off deep sleep, or disconnect) flushes everything.
+- **Backed by FCB on its OWN partition (`log_partition`)** — Zephyr's power-fail-safe Flash Circular
+  Buffer. It never touches the settings/NVS partition that holds the load-bearing NS2 bond. The
+  worker's write is `fcb_append`→`flash_area_write`→`append_finish`, 4-byte aligned (S3
+  `write-block-size=4`); the line is padded and FCB records the true length so read-back is clean. The
+  ring auto-rotates (erase-oldest) when full.
+- **Retrieval — replay on boot:** on the next boot `jb_trace_init()` (first call in `main()`) dumps
+  the most recent `TRACE_DUMP_LAST_N` (100) entries straight to the console UART via `uart_poll_out`
+  (not the deferred log backend, which would drop a multi-line burst), bracketed by
+  `==== persisted trace ====`. The dump is bounded (`fcb_offset_last_n`) because the ring holds
+  thousands of lines before it wraps and the whole thing goes out byte-by-byte at 115200. So: plug into the
+  PC, open the serial monitor, tap EN/RESET (or BOOT) → the offline session prints. Reset cause in
+  the boot marker decodes battery/offline events: `RESET_BROWNOUT 0x04` (battery sag), `RESET_POR
+  0x08`, `RESET_LOW_POWER_WAKE 0x80` (NS2-off deep-sleep wake), `RESET_PIN 0x01` (EN/RESET).
+- **Retrieval — esptool pull** (no reboot): `esptool read-flash 0xfc0000 0x40000 trace.bin` then
+  `strings trace.bin`.
+- **Partition layout (load-bearing-adjacent):** the board overlay trims `storage_partition`'s tail
+  from `0x1000000`→`0xfc0000` and carves `log_partition` = top 256 KB (`0xfc0000`, `0x40000`). The
+  storage **start stays `0x3b0000`** and NVS fills from the start, so the existing bond (low sectors
+  of a 12 MB partition) is untouched by removing the unused tail. `log_partition` needs
+  `compatible = "zephyr,mapped-partition"` like every sibling in this AMP layout (the parent
+  `partitions` node is not `fixed-partitions`, so `PARTITION_ID()` resolves via the mapped path —
+  without the compat the build fails with an undeclared `…_PARTITION_ID`).
 
 ## If NS2 pairing regresses
 

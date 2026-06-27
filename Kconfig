@@ -66,6 +66,28 @@ config JOY_BRIDGE_SLEEP_ON_NS2_OFF
 	  reconnects. Tap BOOT briefly — holding it through the wake-reset enters
 	  serial-download mode, since GPIO0 is the boot strapping pin.
 
+config JOY_BRIDGE_PERSIST_LOG
+	bool "Persist a curated event trace to flash (offline diagnostics)"
+	default n
+	select FCB
+	select FLASH_MAP
+	select HWINFO
+	help
+	  Record a curated, low-rate trace of significant runtime events — boot +
+	  reset cause, BLE connect / disconnect (+ HCI reason), security level,
+	  connection-interval changes, deep-sleep entry, and USB controller
+	  bind/removal — to a dedicated flash partition (log_partition), so the
+	  device's behaviour while running offline (on battery, with no serial
+	  console attached) can be reviewed later. On boot the stored trace is
+	  replayed to the console; the raw partition is also esptool-pullable.
+
+	  Backed by the Flash Circular Buffer over its OWN partition: it never
+	  shares the settings/NVS partition that holds the load-bearing NS2 bond.
+	  Events are buffered in RAM and flushed to flash by a low-priority worker
+	  once the BLE link is settled (and synchronously before deep sleep) —
+	  never inline, since writing flash stalls the XIP cache and would disrupt
+	  the boot/pairing path. Leave OFF for a minimal build.
+
 config JOY_BRIDGE_DIAG_HEXDUMP
 	bool "DIAG: hexdump NS2 <-> controller ATT traffic"
 	default n

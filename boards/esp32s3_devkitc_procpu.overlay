@@ -12,9 +12,31 @@
     reg = <0x0 DT_SIZE_M(16)>;
 };
 
-/* 2. Stretch the storage partition */
+/* 2. Stretch the storage partition.
+ * Ends at 0xfc0000 (not 0x1000000): the top 256 KB is reserved for the
+ * persistent-trace partition below. The start stays at 0x3b0000, and NVS fills
+ * from the start, so the existing NS2 bond (in the low sectors) is unaffected by
+ * trimming the unused tail. */
 &storage_partition {
-    reg = <0x003b0000 0x00C50000>;
+    reg = <0x003b0000 0x00C10000>;
+};
+
+/* 2a. Persistent event-trace ring (CONFIG_JOY_BRIDGE_PERSIST_LOG).
+ * Top 256 KB of flash, its own partition so the trace never shares the NVS
+ * partition that holds the load-bearing bond. Bound by FCB in src/app/trace.c
+ * via its node label `log_partition`. esptool-pullable:
+ *   esptool read-flash 0xfc0000 0x40000 trace.bin   (then `strings trace.bin`). */
+&flash0 {
+    partitions {
+        log_partition: partition@fc0000 {
+            /* Same compatible as every sibling in this AMP layout — the parent
+             * `partitions` node is not a `fixed-partitions` node, so PARTITION_ID()
+             * resolves via the mapped-partition path (as storage_partition does). */
+            compatible = "zephyr,mapped-partition";
+            label = "log";
+            reg = <0x00fc0000 0x00040000>;
+        };
+    };
 };
 
 /* 3. Enable the internal 8 MB PSRAM */

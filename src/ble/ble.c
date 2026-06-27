@@ -44,6 +44,7 @@
 #include "utils.h"
 #include "ble/ble_iface.h"
 #include "ble_internal.h"
+#include "trace.h"
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(jb_ble, CONFIG_JOY_BRIDGE_LOG_LEVEL);
@@ -89,6 +90,11 @@ static void ns2_sleep_work_fn(struct k_work *work) {
                                      ESP_EXT1_WAKEUP_ANY_LOW) != ESP_OK) {
         ESP_LOGE(LOG_BLE_GAP, "ext1 wake config failed; only RESET will wake");
     }
+    /* Persist the deep-sleep entry (and any still-pending events) before
+     * powering down. The link is already down here, so a synchronous flash
+     * flush is safe — and it must happen now, as the worker won't run again. */
+    jb_trace("deep sleep (NS2 off)");
+    jb_trace_flush();
     /* Flush the queued "deep sleep" log synchronously — the deferred backend
      * would otherwise lose it when the CPU and UART power down below. */
     log_panic();
@@ -222,6 +228,9 @@ static void on_connected(struct bt_conn *conn, uint8_t err) {
             ESP_LOGI(LOG_BLE_GAP, "initial conn: interval=%u (%u.%02u ms) latency=%u timeout=%u",
                      interval, (interval * 5) / 4,
                      ((interval * 5) % 4) * 25, info.le.latency, info.le.timeout);
+            const uint8_t *na = g_console_ns2.ble_addr.val;
+            jb_trace("connect NS2 %02x:%02x:%02x:%02x:%02x:%02x itvl=%u",
+                     na[5], na[4], na[3], na[2], na[1], na[0], interval);
 
             /* Mirror upstream gap.c: do NOT drive a sub-spec interval from the
              * peripheral. Upstream requests itvl_min=6 (7.5 ms) and otherwise
@@ -256,6 +265,7 @@ static void on_connected(struct bt_conn *conn, uint8_t err) {
 
 static void on_disconnected(struct bt_conn *conn, uint8_t reason) {
     ESP_LOGI(LOG_BLE_GAP, "disconnected, reason=%u", reason);
+    jb_trace("disconnect reason=0x%02x", reason);
 
     if (default_conn) {
         bt_conn_unref(default_conn);
@@ -296,6 +306,8 @@ static void on_le_param_updated(struct bt_conn *conn, uint16_t interval,
                                 uint16_t latency, uint16_t timeout) {
     ESP_LOGI(LOG_BLE_GAP, "conn params updated: interval=%u (%u.%02u ms) latency=%u timeout=%u",
              interval, (interval * 5) / 4, ((interval * 5) % 4) * 25, latency, timeout);
+    jb_trace("conn itvl=%u (%u.%02u ms) lat=%u to=%u",
+             interval, (interval * 5) / 4, ((interval * 5) % 4) * 25, latency, timeout);
 #if defined(CONFIG_BT_SMP) && CONFIG_JOY_BRIDGE_BLE_FAST_CONN_INTERVAL > 0
     /* NS2 connects at ~5 ms but unilaterally downgrades to a ~30 ms power-save
      * interval a few seconds in (observed on hardware), and nothing watches for
@@ -318,6 +330,7 @@ static void on_security_changed(struct bt_conn *conn, bt_security_t level,
                                 enum bt_security_err err) {
     ARG_UNUSED(conn);
     ESP_LOGI(LOG_BLE_GAP, "security changed: level=%d err=%d", level, err);
+    jb_trace("security level=%d err=%d", level, err);
 #if CONFIG_JOY_BRIDGE_BLE_FAST_CONN_INTERVAL > 0
     if (err == BT_SECURITY_ERR_SUCCESS && level >= BT_SECURITY_L4) {
         /* Settle, then ask NS2 for the faster interval (post-pairing only),

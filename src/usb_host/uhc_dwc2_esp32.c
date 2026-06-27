@@ -93,6 +93,11 @@ static K_KERNEL_STACK_DEFINE(uhc_dwc2_thread_stack, 4096);
 #define UHC_DWC2_QTD_LIST_LEN 32 /* sized for periodic INTR (= frame-list length) */
 #define UHC_DWC2_CTRL_LIST_LEN 3 /* one QTD per control stage (non-periodic) */
 #define UHC_DWC2_FRAME_LIST_LEN USB_HAL_FRAME_LIST_LEN_32
+/* Silent retries for a failed control transfer before surfacing the error to the
+ * host stack. Enumeration on this board occasionally hits a transient transaction
+ * error (a marginal-VBUS glitch) reading the config descriptor; retrying the whole
+ * control transfer from SETUP rides it out so the pad enumerates first time. */
+#define UHC_DWC2_XFER_MAX_RETRIES 3
 static usb_dwc_ll_dma_qtd_t qtd_list[UHC_DWC2_QTD_LIST_LEN]
 	__aligned(USB_DWC_QTD_LIST_MEM_ALIGN);
 
@@ -228,6 +233,7 @@ static void uhc_dwc2_schedule(const struct device *dev)
 	}
 
 	data->active = xfer;
+	data->retries = 0;
 
 	/* Reconfigure the channel only when the target endpoint changes. Re-running
 	 * set_ep_char / resetting the toggle on every interrupt re-poll would drop
@@ -261,6 +267,44 @@ static void uhc_dwc2_schedule(const struct device *dev)
 	uhc_dwc2_begin_stage(data);
 }
 
+/* Surface a transfer error to the host stack, or — for a control transfer that
+ * has retries left — silently restart it from SETUP. STALL (-EPIPE) is a valid
+ * protocol response and is never retried; other errors are transient (e.g. an
+ * excessive-transaction-error glitch during enumeration) and a clean re-run of
+ * the whole control transfer usually succeeds. Only control transfers are
+ * retried, to leave the working interrupt-IN poll path untouched. */
+static void uhc_dwc2_fail_or_retry(const struct device *dev, int err)
+{
+	struct uhc_dwc2_data *data = uhc_get_private(dev);
+	struct uhc_transfer *xfer = data->active;
+
+	if (xfer == NULL) {
+		return;
+	}
+
+	if (err != -EPIPE && USB_EP_GET_IDX(xfer->ep) == 0 &&
+	    data->retries < UHC_DWC2_XFER_MAX_RETRIES) {
+		data->retries++;
+		LOG_DBG("control xfer err %d -> retry %u/%u", err, data->retries,
+			UHC_DWC2_XFER_MAX_RETRIES);
+		/* Let the bus/device settle briefly before re-driving SETUP. */
+		k_msleep(5);
+		xfer->stage = UHC_CONTROL_STAGE_SETUP;
+		if (xfer->buf != NULL) {
+			net_buf_reset(xfer->buf); /* discard any partial IN data */
+		}
+		uhc_dwc2_begin_stage(data);
+		return;
+	}
+	if (err != -EPIPE && USB_EP_GET_IDX(xfer->ep) == 0) {
+		LOG_WRN("control xfer err %d -> retries exhausted (%u)", err, data->retries);
+	}
+
+	uhc_xfer_return(dev, xfer, err);
+	data->active = NULL;
+	data->retries = 0;
+}
+
 /* Channel transfer-complete: parse the QTD, advance control stages or finish. */
 static void uhc_dwc2_on_cplt(const struct device *dev)
 {
@@ -276,8 +320,7 @@ static void uhc_dwc2_on_cplt(const struct device *dev)
 	usb_dwc_hal_xfer_desc_parse(qtd_list, 0, &rem_len, &status);
 
 	if (status != USB_DWC_HAL_XFER_DESC_STS_SUCCESS) {
-		uhc_xfer_return(dev, xfer, -EIO);
-		data->active = NULL;
+		uhc_dwc2_fail_or_retry(dev, -EIO);
 		return;
 	}
 
@@ -345,10 +388,7 @@ static void uhc_dwc2_handle_chan_events(const struct device *dev)
 
 			LOG_DBG("channel error e=%d -> %d", e, err);
 
-			if (data->active != NULL) {
-				uhc_xfer_return(dev, data->active, err);
-				data->active = NULL;
-			}
+			uhc_dwc2_fail_or_retry(dev, err);
 			break;
 		}
 		case USB_DWC_HAL_CHAN_EVENT_HALT_REQ:

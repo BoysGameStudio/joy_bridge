@@ -26,6 +26,7 @@
 #include "usbh_class.h"  /* USBH_CLASS_MATCH_*, USBH_CLASS_IFNUM_DEVICE */
 
 #include "input/xinput.h"
+#include "trace.h"
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(jb_xinput_class, CONFIG_JOY_BRIDGE_LOG_LEVEL);
@@ -228,6 +229,7 @@ static int xinput_probe(struct usbh_class_data *const c_data,
 
 	LOG_INF("XInput controller bound (iface %u, ep 0x%02x, mps %u, bInterval %u, pool %d/%d)",
 		iface, ep_addr, ep_mps, ep_interval, submitted, XINPUT_NUM_XFERS);
+	jb_trace("XInput bound iface=%u ep=0x%02x mps=%u", iface, ep_addr, ep_mps);
 	return 0;
 }
 
@@ -250,6 +252,7 @@ static int xinput_removed(struct usbh_class_data *const c_data)
 	 * buttons stuck pressed on the console. */
 	xinput_map_neutral();
 	LOG_INF("XInput controller removed");
+	jb_trace("XInput removed");
 	return 0;
 }
 

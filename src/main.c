@@ -9,12 +9,19 @@
 #include "controller/hid_controller.h"
 #include "storage.h"
 #include "usb_host.h"
+#include "trace.h"
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(jb_main, CONFIG_JOY_BRIDGE_LOG_LEVEL);
 #include "app_log.h"
 
 int main(void) {
+    /* First: replay any persisted offline trace to the console and mark this
+     * boot (with the reset cause). Done before other init so the dump leads and
+     * does not interleave with normal log output. No-op unless
+     * CONFIG_JOY_BRIDGE_PERSIST_LOG. */
+    jb_trace_init();
+
     ESP_LOGI(LOG_APP, "Nintendo Switch Controller Emulator (joy_bridge)");
     ESP_LOGI(LOG_APP, "Starting initialization...");
 

@@ -65,6 +65,10 @@ struct uhc_dwc2_data {
 	uint8_t cur_ep;
 	uint8_t cur_addr;
 	uint16_t cur_mps;
+	/* Silent retry count for the active control transfer — rides out transient
+	 * transaction errors (e.g. marginal-VBUS glitches that otherwise fail a
+	 * config-descriptor read during enumeration). Reset per scheduled transfer. */
+	uint8_t retries;
 };
 
 #endif /* UHC_DWC2_ESP32_H */
