@@ -91,7 +91,10 @@ static void controller_task(void *p1, void *p2, void *p3) {
     while (ctrl->task_running) {
         /* Connected + HID characteristic subscribed + DEV_READY? */
         if (!ble_hid_ready()) {
-            k_msleep(100);
+            /* Idle until the link is ready again. Wait on the sem (rather than a
+             * plain sleep) so stop_task() — which gives it — wakes us promptly to
+             * observe task_running and exit, bounding the join in stop_task(). */
+            k_sem_take(&report_ready_sem, K_MSEC(100));
             last_send_ms = 0;
             continue;
         }
@@ -101,9 +104,18 @@ static void controller_task(void *p1, void *p2, void *p3) {
          * cadence. */
         k_sem_take(&report_ready_sem, K_MSEC(HID_REPORT_INTERVAL));
 
-        /* Cap sends at ~one per HID_REPORT_INTERVAL (== connection interval) so
-         * dense input can't backlog the BLE TX queue; the swap below still sends
-         * the freshest committed report. */
+        /* Stopped while we were waiting? Leave now — before any send — so
+         * stop_task()'s join returns promptly and we never notify on a link being
+         * torn down. */
+        if (!ctrl->task_running) {
+            break;
+        }
+
+        /* Cap sends at ~one per HID_REPORT_INTERVAL so dense input can't backlog
+         * the BLE TX queue; the snapshot below still sends the freshest committed
+         * report. Set CONFIG_HID_REPORT_INTERVAL to the (fast) connection interval
+         * — prj.conf uses 5 ms to match the 200 Hz link; the stock 15 ms default
+         * would throttle input to ~66 Hz regardless of how fast the link runs. */
         int64_t now_ms = k_uptime_get();
         if (last_send_ms != 0 && (now_ms - last_send_ms) < HID_REPORT_INTERVAL) {
             k_msleep(HID_REPORT_INTERVAL - (uint32_t)(now_ms - last_send_ms));
@@ -125,27 +137,24 @@ static void controller_task(void *p1, void *p2, void *p3) {
                 continue;
             }
 
+            /* Snapshot the published front buffer under k_sched_lock. The writer
+             * publishes by swapping front<->back in hid_commit() (also under
+             * k_sched_lock) only after fully writing the back buffer, and it never
+             * writes the front buffer — so holding the lock across next_report() +
+             * memcpy yields a complete, stable snapshot and stops the front pointer
+             * being swapped out mid-copy. swap_request only flags whether this send
+             * carries fresh input (single-core; no blocking call inside the lock). */
 #ifdef CONFIG_JOY_BRIDGE_DIAG_LATENCY
-            bool had_new = ctrl->buffer.swap_request;
+            bool had_new;
 #endif
-            /* Swap front/back if a commit was requested. k_sched_lock makes the
-             * three-pointer swap atomic against the writer's get_back_buffer()
-             * read, so it can never observe the half-swapped state and write the
-             * buffer being read (single-core; no blocking call inside). The
-             * barriers order the writer's buffer stores vs. swap_request. */
             k_sched_lock();
-            if (ctrl->buffer.swap_request) {
-                MEMORY_BARRIER();
-                controller_hid_report_t *temp = ctrl->buffer.front_buffer;
-                ctrl->buffer.front_buffer = ctrl->buffer.back_buffer;
-                ctrl->buffer.back_buffer = temp;
-                MEMORY_BARRIER();
-                ctrl->buffer.swap_request = 0;
-            }
-            k_sched_unlock();
-
+#ifdef CONFIG_JOY_BRIDGE_DIAG_LATENCY
+            had_new = ctrl->buffer.swap_request;
+#endif
+            ctrl->buffer.swap_request = 0;
             uint8_t *next_report = ctrl->hid_ops->next_report(ctrl->buffer.front_buffer);
             memcpy(report_buffer, next_report, report_size);
+            k_sched_unlock();
 
             int rc = ble_hid_notify(report_buffer, report_size);
             if (rc != 0) {
@@ -270,8 +279,16 @@ static void controller_stop_task_impl(controller_handle_t *ctrl) {
         return;
     }
     if (ctrl->task_handle != NULL) {
+        /* Cooperative stop + join rather than k_thread_abort(): aborting the
+         * thread mid-flight could strand a host lock if it were inside
+         * bt_gatt_notify(). Clear the run flag, wake it from its sem wait, and
+         * wait for it to leave the loop at a safe point. The thread only blocks in
+         * short waits (<= HID_REPORT_INTERVAL) plus the now sem-interruptible idle
+         * wait, so the join returns promptly; callers (CCC change / disconnect /
+         * deinit) all run in thread context where blocking briefly is fine. */
         ctrl->task_running = false;
-        k_thread_abort(ctrl->task_handle);
+        k_sem_give(&report_ready_sem);
+        k_thread_join(ctrl->task_handle, K_FOREVER);
         ctrl->task_handle = NULL;
     }
 }
@@ -287,8 +304,21 @@ static void controller_hid_commit_impl(controller_handle_t *ctrl) {
     if (ctrl == NULL) {
         return;
     }
+    /* Publish the freshly-written back buffer by swapping it to the front, under
+     * k_sched_lock so the swap is atomic against the report thread's snapshot
+     * (single-core; no blocking call inside). The producer only ever writes the
+     * back buffer and swaps it here once complete, so the report thread can never
+     * read a half-written buffer, and the buffer the producer fills next (the new
+     * back) is never the one being read (the front). swap_request marks that this
+     * send carries fresh input (consumed by the report thread / latency diag). */
+    k_sched_lock();
+    MEMORY_BARRIER();
+    controller_hid_report_t *temp = ctrl->buffer.front_buffer;
+    ctrl->buffer.front_buffer = ctrl->buffer.back_buffer;
+    ctrl->buffer.back_buffer = temp;
     MEMORY_BARRIER();
     ctrl->buffer.swap_request = 1;
+    k_sched_unlock();
     k_sem_give(&report_ready_sem);
 }
 
@@ -296,8 +326,15 @@ static void controller_hid_reset_impl(controller_handle_t *ctrl) {
     if (ctrl == NULL || ctrl->hid_ops == NULL || ctrl->hid_ops->report_init == NULL) {
         return;
     }
+    /* Re-init both buffers under k_sched_lock: the input producer can still be
+     * committing (which swaps the front/back pointers, also under the lock) and
+     * writing the back buffer while this runs — USB input is independent of the BLE
+     * subscription change that triggers the reset. The buffers are already
+     * allocated here, so report_init() does no malloc (bounded work under the lock). */
+    k_sched_lock();
     ctrl->hid_ops->report_init(ctrl->buffer.front_buffer);
     ctrl->hid_ops->report_init(ctrl->buffer.back_buffer);
+    k_sched_unlock();
 }
 
 const controller_ops_t controller_ops = {

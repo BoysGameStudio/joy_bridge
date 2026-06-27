@@ -147,10 +147,12 @@ include/input/xinput.h, include/usb_host.h
 ```
 
 Data path: pad → `uhc_dwc2_esp32` (UHC) → Zephyr USBH stack → `xinput_class` (claims the gamepad
-interface, submits an interrupt-IN poll) → `xinput_map_report()` → `g_hid_controller` back buffer
-→ existing HID report thread → NS2. `main.c` calls `xinput_host_start()` **after** BLE init so a
-USB failure can't block the load-bearing BLE path. The UHC driver is single-active (one channel
-runs one `uhc_transfer` at a time, the model the UHC layer is built around — cf. `uhc_max3421e`).
+interface, keeps a small pool of interrupt-IN polls queued) → `xinput_map_report()` →
+`g_hid_controller` back buffer → existing HID report thread → NS2. `main.c` calls
+`xinput_host_start()` **after** BLE init so a USB failure can't block the load-bearing BLE path. The
+UHC driver is single-active (one channel runs one `uhc_transfer` at a time, the model the UHC layer
+is built around — cf. `uhc_max3421e`); the class-side pool keeps that one channel from idling
+between polls (see *Known characteristics*).
 
 **Build wiring (load-bearing — the host HAL is NOT compiled by default):**
 - `CONFIG_UHC_DWC2=y` (now in the `modules/uhc_dwc2_esp32` module Kconfig) makes hal_espressif compile
@@ -205,10 +207,22 @@ Each was found by capturing the failing flow over serial and cross-checking the 
 3. Serial shows `XInput controller bound (iface…ep…mps…)`; press buttons → the NS2 responds.
 
 ### Known characteristics / follow-ups
-- **Idle report rate is modest** (~tens/s): the engine is single-active and re-arms each interrupt
-  transfer through a full completion → class-cb → re-enqueue round trip (one-shot QTD + HOC halt per
-  report). Button/stick *changes* register promptly (XInput reports on change). For a high steady
-  rate, move to a continuous multi-buffer periodic poll (the ESP-IDF HCD scheme) — clean follow-up.
+- **Report rate / poll pipelining (DONE — the class now multi-buffers):** `xinput_class.c` keeps a
+  pool of `XINPUT_NUM_XFERS` (4) interrupt-IN transfers queued, each re-armed in its own completion
+  callback, so the UHC channel restarts on the *next already-queued* transfer instead of idling for a
+  full completion → class-cb → re-enqueue round trip. The UHC **driver** itself is still single-active
+  (one channel runs one `uhc_transfer` at a time), so this is the cheap, in-class half of the old
+  "continuous multi-buffer poll" follow-up; a fully continuous periodic multi-QTD scheme (the ESP-IDF
+  HCD model) inside the driver remains the deeper option if the rate still needs lifting. Measure with
+  `CONFIG_JOY_BRIDGE_DIAG_LATENCY=y` (XInput rate + arrival→notify latency, once/sec) — it auto-selects
+  `UHC_DWC2_DIAG_LATENCY` (the in-driver completion→re-arm probe). The HID report thread caps sends at
+  `CONFIG_HID_REPORT_INTERVAL` (**15 ms** — the default). A 5 ms cadence (to match the fast link) was
+  tried and **regressed input on hardware**: the NS2 periodically power-saves the link to ~30 ms, and
+  5 ms sends then overrun the small BLE TX buffer pool (the "12 != 10" ACL/tx-context margin) →
+  notifies stall/`-ENOMEM` → reports stop reaching the console (`-12` on every notify, 14 ms latency).
+  Lowering latency safely needs a cadence that tracks the *negotiated* connection interval rather than
+  a fixed value — open follow-up. Button/stick *changes* still register promptly (XInput reports on
+  change).
 - **VBUS (hardware):** the internal PHY host mode does NOT source VBUS, and the DevKitC native USB-C
   VBUS is Schottky-isolated from 5 V — so the pad gets no power and never enumerates (LEDs dark). No
   firmware fix on a stock DevKitC: power the pad externally / direct-attach it (power-injecting OTG
@@ -236,8 +250,10 @@ Each was found by capturing the failing flow over serial and cross-checking the 
   cmd-0x15 re-key). It requires `pro2_host_addr_init()` (pro2.c) to restore the saved NS2
   console address on boot; without it the wake-adv payload and the injected LTK bond
   (`ble_store.c`) both target `00:00:..:00` and the console can't reconnect.
-- PSRAM is disabled in `prj.conf` (the octal-mode config from the hello-world overlay hung early
-  SoC init); re-enable with the correct mode only if needed.
+- PSRAM is disabled — in `prj.conf` (`CONFIG_ESP_SPIRAM` off) **and** in the board overlay (the
+  `&psram0` node is `status = "disabled"`, not a misleading `"okay"` + 8 MB). The octal-mode config
+  carried from the hello-world overlay hung early SoC init. Re-enabling needs BOTH flipped together,
+  with the correct mode/size — don't half-enable it.
 
 ## Gotchas
 

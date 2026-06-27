@@ -40,10 +40,15 @@
     };
 };
 
-/* 3. Enable the internal 8 MB PSRAM */
+/* 3. PSRAM: left DISABLED, to match prj.conf (CONFIG_ESP_SPIRAM is off).
+ * The octal-mode SPIRAM config carried over from the Hello-World overlay hung
+ * early SoC init on this board, and the app does not need PSRAM. Keeping the node
+ * disabled (rather than "okay" with an 8 MB size that nothing initialises) avoids
+ * a half-enabled trap: re-enabling means flipping BOTH this status — with the
+ * correct size — AND the Kconfig (CONFIG_ESP_SPIRAM + the right SPIRAM_MODE_xxx)
+ * together. See AGENTS.md "Current state & known gaps". */
 &psram0 {
-    status = "okay";
-    size = <DT_SIZE_M(8)>;
+    status = "disabled";
 };
 
 /* 4. Bring up USB-OTG in HOST mode for the XInput controller bridge.

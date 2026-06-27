@@ -114,7 +114,12 @@ static uint8_t fast_interval_attempts;
  * retry every few seconds until the link reaches the target interval (or give
  * up after a bounded number of tries). */
 static void fast_interval_work_fn(struct k_work *work) {
-    struct bt_conn *conn = default_conn;
+    /* Take a reference to the active connection atomically with the read, so a
+     * concurrent on_disconnected() — which clears default_conn under the same
+     * scheduler lock — cannot free it out from under us mid-use. */
+    k_sched_lock();
+    struct bt_conn *conn = default_conn ? bt_conn_ref(default_conn) : NULL;
+    k_sched_unlock();
     if (conn == NULL) {
         return;
     }
@@ -122,11 +127,13 @@ static void fast_interval_work_fn(struct k_work *work) {
     struct bt_conn_info info;
     if (bt_conn_get_info(conn, &info) == 0 &&
         (info.le.interval_us / 1250U) <= CONFIG_JOY_BRIDGE_BLE_FAST_CONN_INTERVAL) {
+        bt_conn_unref(conn);
         return; /* already at/below the requested interval — done */
     }
     if (fast_interval_attempts >= 5) {
         ESP_LOGW(LOG_BLE_GAP, "NS2 kept the slow interval after %u requests",
                  fast_interval_attempts);
+        bt_conn_unref(conn);
         return;
     }
     fast_interval_attempts++;
@@ -143,6 +150,7 @@ static void fast_interval_work_fn(struct k_work *work) {
              fast_interval_attempts, itvl, (itvl * 5) / 4, ((itvl * 5) % 4) * 25);
 
     k_work_reschedule(k_work_delayable_from_work(work), K_MSEC(3000));
+    bt_conn_unref(conn);
 }
 static K_WORK_DELAYABLE_DEFINE(fast_interval_work, fast_interval_work_fn);
 #endif
@@ -265,9 +273,14 @@ static void on_connected(struct bt_conn *conn, uint8_t err) {
 static void on_disconnected(struct bt_conn *conn, uint8_t reason) {
     JOURNAL(CONN, Display, All, "disconnect reason=0x%02x", reason);
 
-    if (default_conn) {
-        bt_conn_unref(default_conn);
-        default_conn = NULL;
+    /* Detach + unref the active connection atomically vs. fast_interval_work_fn,
+     * which reads-and-refs default_conn under the same scheduler lock. */
+    k_sched_lock();
+    struct bt_conn *gone = default_conn;
+    default_conn = NULL;
+    k_sched_unlock();
+    if (gone) {
+        bt_conn_unref(gone);
     }
 
     /* Stop the HID report thread (mirrors upstream gap.c disconnect). */

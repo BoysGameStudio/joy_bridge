@@ -63,9 +63,9 @@ struct controller_handle {
     controller_type_t type;
 
     struct {
-        controller_hid_report_t *front_buffer;
-        controller_hid_report_t *back_buffer;
-        volatile uint32_t swap_request;
+        controller_hid_report_t *front_buffer; /* published; snapshotted by the report thread */
+        controller_hid_report_t *back_buffer;  /* written by the input producer */
+        volatile uint32_t swap_request;        /* set on publish: this send carries fresh input */
     } buffer;
 
     k_tid_t  task_handle;       /* NULL when the report thread is stopped */
