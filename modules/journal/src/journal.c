@@ -9,7 +9,7 @@
  * (FCB): power-fail-safe, self-rotating, CRC-checked entries.
  *
  * Events are never written to flash inline (writing flash can stall the XIP
- * instruction cache and disrupt tightly-timed work). journal_put() only enqueues
+ * instruction cache and disrupt tightly-timed work). z_journal_emit() only enqueues
  * into a small RAM ring; a low-priority worker drains it to flash, and only while
  * the caller-supplied write-gate permits. journal_flush() drains synchronously
  * for a moment the caller guarantees is safe (e.g. just before deep sleep).
@@ -81,8 +81,6 @@ static void console_write(const char *s, size_t len)
 #else
 static void console_write(const char *s, size_t len) { ARG_UNUSED(s); ARG_UNUSED(len); }
 #endif
-
-static void console_puts(const char *s) { console_write(s, strlen(s)); }
 
 /* By value: FCB_ENTRY_FA_DATA_OFF() needs a struct lvalue (it uses `loc.field`,
  * which misparses on `*ptr`). fcb_entry is small, so this is cheap. */
@@ -201,12 +199,17 @@ K_THREAD_DEFINE(journal_flush_tid, 1536, flush_thread_fn, NULL, NULL, NULL,
 
 /* ---- enqueue ------------------------------------------------------------ */
 
-void journal_put(const char *fmt, ...)
+void z_journal_emit(const char *fmt, ...)
 {
 	char buf[CONFIG_JOURNAL_LINE_MAX];
 
-	/* Prefix the uptime (ms) so the replayed log carries relative timing. */
-	int p = snprintf(buf, sizeof(buf), "%llu ", (unsigned long long)k_uptime_get());
+	/* Prefix the uptime as HH:MM:SS.mmm so the replayed log carries readable
+	 * relative timing (uptime since boot; the device has no RTC for wall-clock). */
+	uint64_t up = (uint64_t)k_uptime_get();
+	uint64_t up_s = up / 1000U;
+	int p = snprintf(buf, sizeof(buf), "%02u:%02u:%02u.%03u ",
+			 (unsigned)(up_s / 3600U), (unsigned)((up_s / 60U) % 60U),
+			 (unsigned)(up_s % 60U), (unsigned)(up % 1000U));
 	if (p < 0) {
 		return;
 	}
@@ -235,6 +238,42 @@ void journal_put(const char *fmt, ...)
 }
 
 /* ---- init --------------------------------------------------------------- */
+
+/* Render the hwinfo reset-cause bitmask as short names (e.g. "POR", "BROWNOUT",
+ * "PIN+WATCHDOG"); appends "+0x<rest>" for bits without a known name, and falls
+ * back to plain hex if the mask has no known bits. */
+static void reset_cause_str(uint32_t cause, char *out, size_t n)
+{
+	static const struct {
+		uint32_t bit;
+		const char *name;
+	} names[] = {
+		{ RESET_PIN, "PIN" },
+		{ RESET_SOFTWARE, "SW" },
+		{ RESET_BROWNOUT, "BROWNOUT" },
+		{ RESET_POR, "POR" },
+		{ RESET_WATCHDOG, "WATCHDOG" },
+		{ RESET_DEBUG, "DEBUG" },
+		{ RESET_SECURITY, "SECURITY" },
+		{ RESET_LOW_POWER_WAKE, "LOW_POWER_WAKE" },
+		{ RESET_CPU_LOCKUP, "CPU_LOCKUP" },
+	};
+	size_t off = 0;
+	uint32_t rest = cause;
+
+	for (size_t i = 0; i < ARRAY_SIZE(names) && off < n; i++) {
+		if (cause & names[i].bit) {
+			off += snprintf(out + off, n - off, "%s%s",
+					off ? "+" : "", names[i].name);
+			rest &= ~names[i].bit;
+		}
+	}
+	if (off == 0) {
+		snprintf(out, n, "0x%x", cause);              /* no known bits */
+	} else if (rest != 0 && off < n) {
+		snprintf(out + off, n - off, "+0x%x", rest);  /* leftover unknown bits */
+	}
+}
 
 int journal_init(uint8_t flash_area_id, journal_write_gate_t gate)
 {
@@ -271,18 +310,21 @@ int journal_init(uint8_t flash_area_id, journal_write_gate_t gate)
 	}
 	s_ready = true;
 
-	/* Replay the stored log (most recent entries, oldest -> newest). Reads only
-	 * — safe here, before the rest of the system is brought up. */
-	console_puts("\n==== journal ====\n");
+	/* Replay the stored log (most recent entries, oldest -> newest) straight to
+	 * the console. Reads only — safe here, before the rest of the system is
+	 * brought up. No delimiter lines: replayed records print as "<uptime_ms>
+	 * [CAT] msg" whereas the live log that follows is timestamped
+	 * "[hh:mm:ss] <inf> ...", so the two are self-distinguishing. */
 	dump_recent();
-	console_puts("==== end journal ====\n");
 
 	/* Boot marker with the reset cause (bitmask from <zephyr/drivers/hwinfo.h>).
 	 * Enqueued (not written) so the early-boot path stays flash-free; the worker
 	 * persists it once the write-gate opens. */
 	uint32_t cause = 0;
 	(void)hwinfo_get_reset_cause(&cause);
-	journal_put("---- boot (reset_cause=0x%08x) ----", cause);
+	char cause_str[48];
+	reset_cause_str(cause, cause_str, sizeof(cause_str));
+	z_journal_emit("[BOOT] reset=%s", cause_str);
 
 	return 0;
 }

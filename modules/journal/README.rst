@@ -16,7 +16,7 @@ Why a flash ring, written off the hot path
 
 Writing on-chip flash can stall the XIP instruction cache for the duration of the
 write, which disrupts tightly-timed work (radio handshakes, the boot log burst).
-So ``journal_put()`` never touches flash: it only enqueues into a small RAM ring.
+So the flash sink never touches flash inline: it only enqueues into a small RAM ring.
 A low-priority worker drains the ring to flash later, and **only while the
 caller-supplied write-gate permits** — letting a project keep flash writes out of
 its sensitive windows. ``journal_flush()`` drains synchronously for the one moment
@@ -31,9 +31,8 @@ API
 
    int  journal_init(uint8_t flash_area_id, journal_write_gate_t gate);
    void journal_flush(void);
-   void journal_put(const char *fmt, ...);   /* low-level persist-only primitive */
 
-   /* UE_LOG-style front door: */
+   /* UE_LOG-style front door (the only way to record an event): */
    JOURNAL(Category, Verbosity, Target, fmt, ...);
    JOURNAL_IF(cond, Category, Verbosity, Target, fmt, ...);   /* = UE_CLOG */
 
@@ -74,9 +73,10 @@ Retrieval
 ---------
 
 On the next boot ``journal_init()`` dumps the most recent
-``CONFIG_JOURNAL_DUMP_LAST_N`` entries to the console, bracketed by
-``==== journal ====`` / ``==== end journal ====``. The raw partition is also
-readable out-of-band (e.g. ``esptool read-flash`` then ``strings``).
+``CONFIG_JOURNAL_DUMP_LAST_N`` entries straight to the console (no delimiter lines —
+replayed records print as ``<uptime_ms> [CAT] msg``, distinguishable by format from
+the timestamped live log that follows). The raw partition is also readable
+out-of-band (e.g. ``esptool read-flash`` then ``strings``).
 
 Tunables (Kconfig, under ``CONFIG_JOURNAL``)
 --------------------------------------------

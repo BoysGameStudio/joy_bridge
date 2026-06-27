@@ -291,8 +291,9 @@ other projects. API in `modules/journal/include/journal/journal.h`:
   `JOURNAL_IF(cond, …)` = UE_CLOG. It replaced the old `ESP_LOGI(…) + jb_trace(…)` dual-write at the
   connect / disconnect / conn-interval / security / deep-sleep / USB-bind sites (e.g.
   `(CONN, Display, All)`).
-- `journal_put(fmt, …)` — low-level persist-only primitive (the macro's `Flash` path);
-  `journal_flush()` — synchronous drain, called in `ns2_sleep_work_fn` before `log_panic()`.
+- `journal_flush()` — synchronous drain to flash; called in `ns2_sleep_work_fn` before `log_panic()`.
+  (`JOURNAL` / `JOURNAL_IF` are the only public log calls; the macro's flash sink is the internal
+  `z_journal_emit`, not part of the API.)
 - `journal_init(area_id, gate)` — first call in `main()`; mounts the ring, replays the stored trace,
   appends a boot marker (reset cause). joy_bridge passes `PARTITION_ID(log_partition)` and the
   write-gate `ble_hid_ready` (below).
@@ -305,7 +306,7 @@ level, conn-interval updates, deep-sleep entry, and USB XInput bind/removal. Com
 the live console with their UPPERCASE concern-category prefixes — `jb_ble: [CONN] connect NS2 … itvl=12
 (15.00 ms) lat=0 to=200`, `jb_usb: [PAD] XInput bound … bInt=1 pool=4/4`, `jb_ble: [SEC]
 security level=4 err=0` (the category no longer echoes the module name) — **and** persist to flash, the
-boot replay (`==== journal ==== … ==== end journal ====`) dumping the stored entries. The write-gate
+boot replay dumping the stored entries to the console. The write-gate
 behaves: entries drain only after the link settles at L4. Crucially, **NS2 still pairs to security
 level 4** with the logging refactor in place (the load-bearing invariant is intact). The
 **disconnect → deep-sleep flush** path was confirmed in an earlier run (identical mechanism; the lines
@@ -318,9 +319,9 @@ fast-boot — no ROM `rst:` banner) replayed them. Non-`Display` verbosities are
   flash stalls the XIP instruction cache for the duration of the write. During the **boot log-burst**
   and the **NS2 pairing handshake** that corrupts the log backend (live console goes permanently
   silent) and **breaks pairing (security never reaches L4)** — verified by isolating the writes on
-  hardware. A write once the link is *settled* (post-L4, HID flowing) is tolerated. So `JOURNAL()` /
-  `journal_put()` only format the line and push it to a small RAM ring (`CONFIG_JOURNAL_PEND_SLOTS`);
-  they do **no flash I/O** and are safe from any context, including the BLE/USB callbacks during
+  hardware. A write once the link is *settled* (post-L4, HID flowing) is tolerated. So `JOURNAL()`'s
+  flash half only formats the line and pushes it to a small RAM ring (`CONFIG_JOURNAL_PEND_SLOTS`);
+  it does **no flash I/O** and is safe from any context, including the BLE/USB callbacks during
   pairing. A low-priority worker (`flush_thread_fn`, `K_LOWEST_APPLICATION_THREAD_PRIO`) drains the
   ring to flash every ~2 s (`CONFIG_JOURNAL_DRAIN_PERIOD_MS`) **only while the write-gate returns
   true** — joy_bridge wires the gate to `ble_hid_ready()` (settled link), so the module stays
@@ -337,8 +338,9 @@ fast-boot — no ROM `rst:` banner) replayed them. Non-`Display` verbosities are
   own via `FIXED_PARTITION_ID(...)`.
 - **Retrieval — replay on boot:** on the next boot `journal_init()` (first call in `main()`) dumps
   the most recent `CONFIG_JOURNAL_DUMP_LAST_N` (100) entries straight to the console UART via
-  `uart_poll_out` (not the deferred log backend, which would drop a multi-line burst), bracketed by
-  `==== journal ====` / `==== end journal ====`. The dump is bounded (`fcb_offset_last_n`) because the
+  `uart_poll_out` (not the deferred log backend, which would drop a multi-line burst). No delimiter
+  lines — replayed records (`<uptime_ms> [CAT] msg`) are distinguishable by format from the live log
+  (`[hh:mm:ss] <inf> …`) that follows. The dump is bounded (`fcb_offset_last_n`) because the
   ring holds thousands of lines before it wraps and the whole thing goes out byte-by-byte at 115200.
   So: plug into the PC, open the serial monitor, tap EN/RESET (or BOOT) → the offline session prints.
   Reset cause in the boot marker decodes battery/offline events: `RESET_BROWNOUT 0x04` (battery sag),

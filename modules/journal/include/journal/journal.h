@@ -101,12 +101,13 @@ int journal_init(uint8_t flash_area_id, journal_write_gate_t gate);
 void journal_flush(void);
 
 /*
- * Record one preformatted line to the flash ring (no console). Enqueues to the
- * RAM ring only (no flash I/O here), so it is safe from any context — including
- * ISRs and driver callbacks. The JOURNAL() macro calls this for the Flash/All
- * targets; callers normally use the macro rather than this primitive.
+ * Internal — NOT part of the public API. The JOURNAL() macro's flash sink:
+ * enqueues one preformatted line to the RAM ring (drained to flash later by the
+ * worker; no console output, no flash I/O in this call). Exposed only because the
+ * macro expands in caller translation units — applications use
+ * JOURNAL() / JOURNAL_IF(), never this directly.
  */
-__printf_like(1, 2) void journal_put(const char *fmt, ...);
+__printf_like(1, 2) void z_journal_emit(const char *fmt, ...);
 
 #else /* !CONFIG_JOURNAL */
 
@@ -117,7 +118,7 @@ static inline int journal_init(uint8_t flash_area_id, journal_write_gate_t gate)
 	return 0;
 }
 static inline void journal_flush(void) {}
-static inline __printf_like(1, 2) void journal_put(const char *fmt, ...)
+static inline __printf_like(1, 2) void z_journal_emit(const char *fmt, ...)
 {
 	ARG_UNUSED(fmt);
 }
@@ -126,7 +127,7 @@ static inline __printf_like(1, 2) void journal_put(const char *fmt, ...)
 
 /* ---- JOURNAL() macro (UE_LOG-style) ------------------------------------- *
  * The dispatch is config-independent: the Flash/All paths go through
- * journal_put(), which is a no-op stub when CONFIG_JOURNAL=n, so the same macro
+ * z_journal_emit(), which is a no-op stub when CONFIG_JOURNAL=n, so the same macro
  * degrades to console-only with no #ifdef at the call site.
  *
  * Two-stage token paste: first on Verbosity (to pick the console level + the
@@ -139,11 +140,11 @@ static inline __printf_like(1, 2) void journal_put(const char *fmt, ...)
 #define _JRN_T_Console(logmac, tag, cat, fmt, ...)                              \
 	logmac("[" #cat "] " fmt, ##__VA_ARGS__)
 #define _JRN_T_Flash(logmac, tag, cat, fmt, ...)                                \
-	journal_put("[" #cat "] " tag fmt, ##__VA_ARGS__)
+	z_journal_emit("[" #cat "] " tag fmt, ##__VA_ARGS__)
 #define _JRN_T_All(logmac, tag, cat, fmt, ...)                                  \
 	do {                                                                    \
 		logmac("[" #cat "] " fmt, ##__VA_ARGS__);                       \
-		journal_put("[" #cat "] " tag fmt, ##__VA_ARGS__);              \
+		z_journal_emit("[" #cat "] " tag fmt, ##__VA_ARGS__);              \
 	} while (0)
 
 /* Verbosity stage: forward to the chosen target with (console level, flash tag).
@@ -151,7 +152,7 @@ static inline __printf_like(1, 2) void journal_put(const char *fmt, ...)
 #define _JRN_V_Fatal(cat, target, fmt, ...)                                     \
 	do {                                                                    \
 		LOG_ERR("[" #cat "] FATAL " fmt, ##__VA_ARGS__);                \
-		journal_put("[" #cat "] FATAL " fmt, ##__VA_ARGS__);            \
+		z_journal_emit("[" #cat "] FATAL " fmt, ##__VA_ARGS__);            \
 		journal_flush();                                                \
 		k_panic();                                                      \
 	} while (0)
