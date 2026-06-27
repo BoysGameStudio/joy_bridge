@@ -21,11 +21,12 @@
     reg = <0x003b0000 0x00C10000>;
 };
 
-/* 2a. Persistent event-trace ring (CONFIG_JOY_BRIDGE_PERSIST_LOG).
- * Top 256 KB of flash, its own partition so the trace never shares the NVS
- * partition that holds the load-bearing bond. Bound by FCB in src/app/trace.c
- * via its node label `log_partition`. esptool-pullable:
- *   esptool read-flash 0xfc0000 0x40000 trace.bin   (then `strings trace.bin`). */
+/* 2a. Persistent event journal ring (CONFIG_JOURNAL).
+ * Top 256 KB of flash, its own partition so the journal never shares the NVS
+ * partition that holds the load-bearing bond. Bound by FCB in the reusable
+ * `journal` module (modules/journal/), which main() points here by passing
+ * PARTITION_ID(log_partition) to journal_init(). esptool-pullable:
+ *   esptool read-flash 0xfc0000 0x40000 journal.bin (then `strings journal.bin`). */
 &flash0 {
     partitions {
         log_partition: partition@fc0000 {

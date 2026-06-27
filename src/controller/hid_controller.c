@@ -16,7 +16,7 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(jb_hid_controller, CONFIG_JOY_BRIDGE_LOG_LEVEL);
+LOG_MODULE_DECLARE(jb_ctrl, CONFIG_JOY_BRIDGE_LOG_LEVEL);
 #include "app_log.h"
 
 #define CTRL_TASK_STACK_SIZE 4096

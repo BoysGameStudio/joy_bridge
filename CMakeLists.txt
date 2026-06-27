@@ -6,9 +6,19 @@
 # Migrated from the upstream ESP-IDF project. The layering is preserved:
 #   - portable core: app/ (utils, state) / controller(HID) / codec(ns2)
 #   - platform glue (Zephyr): ble/ (bt host), storage/ (settings)
-#   - host input: usb_host/ (native UHC + XInput class) + input/ (XInput->Pro2)
+#   - host input: usb_host/ (XInput class + host glue) + input/ (XInput->Pro2);
+#                 the native UHC driver is the modules/uhc_dwc2_esp32 module
 
 cmake_minimum_required(VERSION 3.20.0)
+
+# Reusable in-tree Zephyr modules (must be on ZEPHYR_EXTRA_MODULES before
+# find_package(Zephyr) so their Kconfig + sources are picked up):
+#   - journal:        persistent flash-backed offline event log (CONFIG_JOURNAL)
+#   - uhc_dwc2_esp32: native ESP32-S3 DWC2 USB host controller (CONFIG_UHC_DWC2)
+list(APPEND ZEPHYR_EXTRA_MODULES
+  ${CMAKE_CURRENT_SOURCE_DIR}/modules/journal
+  ${CMAKE_CURRENT_SOURCE_DIR}/modules/uhc_dwc2_esp32
+)
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(joy_bridge C)
@@ -31,31 +41,12 @@ file(GLOB_RECURSE app_sources CONFIGURE_DEPENDS
 
 target_sources(app PRIVATE ${app_sources})
 
-# ---- Native ESP32-S3 USB-OTG host controller (uhc_dwc2_esp32) ---------------
-# The in-app UHC driver uses two things the Zephyr build does not provide by
-# default:
-#   1. The private UHC driver header (uhc_common.h) for the uhc_xfer_* /
-#      uhc_submit_event helpers exported by drivers/usb/uhc/uhc_common.c.
-#   2. The Espressif host USB HAL (usb_dwc_hal.c) and USB PHY (usb_phy.c)
-#      implementations, which hal_espressif vendors but only compiles
-#      usb_wrap_hal.c from (gated on CONFIG_UHC_DWC2). The HAL's soc/hal/
-#      esp_private include dirs are exposed globally by the module, so these
-#      compile against the app target.
-if(CONFIG_UHC_DWC2)
-  if(NOT ZEPHYR_HAL_ESPRESSIF_MODULE_DIR)
-    message(FATAL_ERROR "CONFIG_UHC_DWC2=y but hal_espressif module dir not found")
-  endif()
-  # Private UHC + USB-host-stack headers (uhc_common.h; usbh_device.h /
-  # usbh_class.h for the in-app XInput class driver — the experimental host
-  # stack has no public class-driver API yet, same as the in-tree UVC class).
-  target_include_directories(app PRIVATE
-    ${ZEPHYR_BASE}/drivers/usb/uhc
-    ${ZEPHYR_BASE}/subsys/usb/host
-  )
-  target_sources(app PRIVATE
-    ${ZEPHYR_HAL_ESPRESSIF_MODULE_DIR}/components/esp_hal_usb/usb_dwc_hal.c
-    ${ZEPHYR_HAL_ESPRESSIF_MODULE_DIR}/components/esp_hal_usb/usb_serial_jtag_hal.c
-    ${ZEPHYR_HAL_ESPRESSIF_MODULE_DIR}/components/esp_hal_usb/${CONFIG_SOC_SERIES}/usb_dwc_periph.c
-    ${ZEPHYR_HAL_ESPRESSIF_MODULE_DIR}/components/esp_hw_support/usb_phy/usb_phy.c
-  )
+# ---- USB host (XInput) ------------------------------------------------------
+# The native UHC host-controller driver now lives in the reusable module
+# modules/uhc_dwc2_esp32 (added to ZEPHYR_EXTRA_MODULES above). The in-app XInput
+# class driver (xinput_class.c) still uses the experimental USB host stack's
+# private class API (usbh_device.h / usbh_class.h) — no public header yet, same
+# as the in-tree UVC host class — so it needs that private include dir.
+if(CONFIG_JOY_BRIDGE_USB_XINPUT)
+  target_include_directories(app PRIVATE ${ZEPHYR_BASE}/subsys/usb/host)
 endif()

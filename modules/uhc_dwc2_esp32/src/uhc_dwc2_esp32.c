@@ -44,7 +44,7 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(uhc_dwc2_esp32, CONFIG_UHC_DRIVER_LOG_LEVEL);
 
-#ifdef CONFIG_JOY_BRIDGE_DIAG_LATENCY
+#ifdef CONFIG_UHC_DWC2_DIAG_LATENCY
 #include <zephyr/sys/printk.h>
 /* Latency localisation: time from an interrupt-IN completion to the next re-arm
  * (the single-active SW round-trip). Logged once/sec via printk so it does not
@@ -198,7 +198,7 @@ static void uhc_dwc2_begin_stage(struct uhc_dwc2_data *data)
 	}
 
 	/* Bulk / interrupt: a single data stage. */
-#ifdef CONFIG_JOY_BRIDGE_DIAG_LATENCY
+#ifdef CONFIG_UHC_DWC2_DIAG_LATENCY
 	diag_mark_rearm(xfer);
 #endif
 	dir_in = USB_EP_DIR_IS_IN(xfer->ep);
@@ -351,7 +351,7 @@ static void uhc_dwc2_on_cplt(const struct device *dev)
 	}
 
 	/* Bulk / interrupt: save the toggle, record received bytes, complete. */
-#ifdef CONFIG_JOY_BRIDGE_DIAG_LATENCY
+#ifdef CONFIG_UHC_DWC2_DIAG_LATENCY
 	diag_mark_cplt(xfer);
 #endif
 	data->in_pid = usb_dwc_hal_chan_get_pid(&data->chan);

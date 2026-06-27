@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+
+config UHC_DWC2
+	bool "ESP32-S3 DWC2 USB host controller (native OTG host mode)"
+	depends on UHC_DRIVER
+	help
+	  Native USB host-controller driver for the ESP32-S3 on-chip USB-OTG
+	  (DesignWare DWC2) core, driven in host mode over the vendored Espressif
+	  USB HAL (usb_dwc_hal) + USB PHY. Upstream Zephyr has no DWC2 host driver
+	  for this core; this module (modules/uhc_dwc2_esp32) provides one.
+
+	  Selecting this also makes hal_espressif compile its USB wrapper HAL (its
+	  zephyr/esp32s3/CMakeLists.txt gates on this exact symbol); the module's
+	  CMakeLists pulls in the remaining host HAL + USB PHY sources.
+
+	  Requires a devicetree node with compatible "espressif,esp32-usb-otg"
+	  (label usb_otg) enabled in host mode — see the module README.
+
+if UHC_DWC2
+
+config UHC_DWC2_DIAG_LATENCY
+	bool "DWC2 UHC: measure interrupt-IN re-arm latency"
+	default n
+	help
+	  Log (once per second, via printk) the time from an interrupt-IN completion
+	  to the next re-arm — the single-active software round-trip that dominates
+	  USB input latency. Diagnostic only; leave off for normal use.
+
+endif # UHC_DWC2

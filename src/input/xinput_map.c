@@ -17,7 +17,7 @@
 #include "controller/hid_controller_pro2.h"
 
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(jb_xinput_map, CONFIG_JOY_BRIDGE_LOG_LEVEL);
+LOG_MODULE_DECLARE(jb_usb, CONFIG_JOY_BRIDGE_LOG_LEVEL);
 #include "app_log.h"
 
 /*

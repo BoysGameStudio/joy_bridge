@@ -32,7 +32,7 @@
 #include "ble_internal.h"
 
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(jb_ble_store, CONFIG_JOY_BRIDGE_LOG_LEVEL);
+LOG_MODULE_DECLARE(jb_ble, CONFIG_JOY_BRIDGE_LOG_LEVEL);
 #include "app_log.h"
 
 int inject_pairing_info_to_ble_ctx(void) {

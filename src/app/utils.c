@@ -12,7 +12,7 @@
 #include <zephyr/bluetooth/crypto.h>
 
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(jb_utils, CONFIG_JOY_BRIDGE_LOG_LEVEL);
+LOG_MODULE_DECLARE(jb_app, CONFIG_JOY_BRIDGE_LOG_LEVEL);
 #include "app_log.h"
 #include "device.h"
 

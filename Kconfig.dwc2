@@ -1,23 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# joy_bridge USB host (XInput) options.
+# joy_bridge USB host (XInput) option.
 #
-# Sourced AFTER Kconfig.zephyr (see Kconfig) so the upstream UHC_DRIVER and
-# USB_HOST_STACK symbols already exist and can be depended on here.
-
-config UHC_DWC2
-	bool "ESP32-S3 DWC2 USB host controller (native OTG host mode)"
-	depends on UHC_DRIVER
-	help
-	  Native USB host-controller driver for the ESP32-S3 on-chip USB-OTG
-	  (DesignWare DWC2) core, driven in host mode over the vendored Espressif
-	  USB HAL (usb_dwc_hal) + USB PHY. Upstream Zephyr has no DWC2 host driver;
-	  this in-app driver (src/usb_host/uhc_dwc2_esp32.c) provides one.
-
-	  Selecting this also makes hal_espressif compile its USB wrapper HAL
-	  (see the module's zephyr/esp32s3/CMakeLists.txt "CONFIG_UHC_DWC2" gate);
-	  the host HAL + USB PHY sources are pulled into the build by the app
-	  CMakeLists.txt.
+# Sourced AFTER Kconfig.zephyr (see Kconfig) so the upstream USB_HOST_STACK
+# symbol already exists and can be depended on here. The native DWC2 host-
+# controller driver's Kconfig (CONFIG_UHC_DWC2) now lives in the reusable
+# modules/uhc_dwc2_esp32 module.
 
 config JOY_BRIDGE_USB_XINPUT
 	bool "XInput USB host gamepad as the controller input source"
@@ -25,4 +13,5 @@ config JOY_BRIDGE_USB_XINPUT
 	help
 	  Read a wired XInput (Xbox-style) controller plugged into the ESP32-S3
 	  USB-OTG port and map its gamepad reports onto the emulated Pro2 HID
-	  report. Requires a working host controller (CONFIG_UHC_DWC2).
+	  report. Requires a working host controller (CONFIG_UHC_DWC2, provided by
+	  the modules/uhc_dwc2_esp32 module).

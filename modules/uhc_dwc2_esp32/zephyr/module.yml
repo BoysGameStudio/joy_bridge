@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Declares `uhc_dwc2_esp32` as a Zephyr module. A consuming project adds it with:
+#   list(APPEND ZEPHYR_EXTRA_MODULES <path>/modules/uhc_dwc2_esp32)
+# before find_package(Zephyr ...), or via a west manifest entry.
+name: uhc_dwc2_esp32
+build:
+  cmake: zephyr
+  kconfig: zephyr/Kconfig

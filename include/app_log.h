@@ -4,16 +4,19 @@
 /*
  * ESP-IDF -> Zephyr logging shim.
  *
- * The ported sources use ESP_LOGx(TAG, fmt, ...). Zephyr selects the log
- * module per translation unit via LOG_MODULE_REGISTER(), so the TAG argument
- * is unused here (it is still defined as a string literal elsewhere, e.g.
- * LOG_APP/LOG_HID, and simply discarded by these macros).
+ * The ported sources use ESP_LOGx(TAG, fmt, ...). Zephyr selects the log module
+ * per translation unit, so the TAG argument is unused here (it is still defined
+ * as a string literal elsewhere, e.g. LOG_APP/LOG_HID, and simply discarded by
+ * these macros).
  *
- * Every .c file that logs must, before including this header, declare its log
- * module:
+ * LOG modules are grouped by subsystem (jb_app, jb_ble, jb_codec, jb_ctrl,
+ * jb_storage, jb_usb). Before including this header, the subsystem's primary .c
+ * registers the module and the other .c files in that subsystem declare it:
  *
  *     #include <zephyr/logging/log.h>
- *     LOG_MODULE_REGISTER(jb_<name>, CONFIG_JOY_BRIDGE_LOG_LEVEL);
+ *     LOG_MODULE_REGISTER(jb_<subsys>, CONFIG_JOY_BRIDGE_LOG_LEVEL);  // once per subsystem
+ *     // ...or, in the subsystem's other files:
+ *     LOG_MODULE_DECLARE(jb_<subsys>, CONFIG_JOY_BRIDGE_LOG_LEVEL);
  *     #include "app_log.h"
  */
 

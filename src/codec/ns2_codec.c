@@ -19,7 +19,7 @@
 #include <errno.h>
 
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(jb_ns2_codec, CONFIG_JOY_BRIDGE_LOG_LEVEL);
+LOG_MODULE_REGISTER(jb_codec, CONFIG_JOY_BRIDGE_LOG_LEVEL);
 #include "app_log.h"
 
 /* Max command-response payload (bytes) the codec emits. cmd_process() frames a

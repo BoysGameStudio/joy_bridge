@@ -19,7 +19,7 @@
 #include <zephyr/random/random.h>
 
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(jb_pro2, CONFIG_JOY_BRIDGE_LOG_LEVEL);
+LOG_MODULE_DECLARE(jb_codec, CONFIG_JOY_BRIDGE_LOG_LEVEL);
 #include "app_log.h"
 
 static int pro2_addr_init(void) {

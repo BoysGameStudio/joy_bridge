@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: Apache-2.0
+
+menuconfig JOURNAL
+	bool "Journal: persistent flash-backed offline event log"
+	select FCB
+	select FLASH_MAP
+	select HWINFO
+	help
+	  Mirror curated, low-rate runtime events to a power-fail-safe flash ring
+	  (Zephyr Flash Circular Buffer) so a headless / battery-powered device's
+	  event history can be reviewed after the fact: replayed to the console on
+	  the next boot, or pulled straight from the flash partition.
+
+	  Events are buffered in RAM and written to flash by a low-priority worker
+	  (and only while the caller-supplied write-gate permits) — never inline,
+	  since writing flash can stall the XIP instruction cache and disrupt
+	  tightly-timed work. The backing partition is chosen by the caller at
+	  journal_init() time, so this module hardcodes no devicetree label.
+
+if JOURNAL
+
+config JOURNAL_LINE_MAX
+	int "Maximum formatted line length (bytes, including the uptime prefix)"
+	default 96
+	help
+	  Per-event line budget. Best kept a multiple of the flash write-block size
+	  (commonly 4); the code defensively rounds down if it is not.
+
+config JOURNAL_PEND_SLOTS
+	int "RAM ring depth (pending events held before a flush)"
+	default 24
+	help
+	  Number of formatted lines buffered in RAM awaiting a flash write. Sized to
+	  hold a boot/connect burst until the write-gate first opens.
+
+config JOURNAL_DUMP_LAST_N
+	int "Boot replay: number of most-recent entries dumped to the console"
+	default 100
+
+config JOURNAL_DRAIN_PERIOD_MS
+	int "Background drain cadence (milliseconds)"
+	default 2000
+
+config JOURNAL_DRAIN_MAX_PER_RUN
+	int "Maximum lines flushed to flash per drain cycle"
+	default 4
+	help
+	  Keeps each flash burst small so it cannot perturb time-sensitive work.
+
+config JOURNAL_FCB_MAGIC
+	hex "FCB magic word (must differ from the flash erase value)"
+	default 0x6a626c67
+
+module = JOURNAL
+module-str = journal
+source "subsys/logging/Kconfig.template.log_config"
+
+endif # JOURNAL

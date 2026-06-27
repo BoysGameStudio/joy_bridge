@@ -41,19 +41,28 @@ export ZEPHYR_SDK_INSTALL_DIR=/Users/alan/Zephyr/zephyr-sdk-1.0.1
 ```
 include/   mirrors upstream main/include
 src/
-  app/        device state, utils, log shim, persistent event trace (trace.c)
+  app/        device state, utils, ESP->Zephyr log shim
   controller/ HID report engine (k_thread + double buffer)
   codec/      NS2 app protocol (ns2_codec / pro2 / ns2)
   ble/        Zephyr bt host glue (ble / gatt / ble_store)
   storage/    settings-backed persistence
-  usb_host/   native ESP32-S3 UHC (DWC2) driver + USBH XInput class driver
+  usb_host/   USBH XInput class driver + host glue (usbh_init/enable)
   input/      XInput report -> Pro2 HID mapping
+modules/      reusable in-tree Zephyr modules (ZEPHYR_EXTRA_MODULES)
+  journal/         flash-backed offline event log (was src/app/trace.c)
+  uhc_dwc2_esp32/  native ESP32-S3 DWC2 USB host-controller driver (was src/usb_host/)
 ```
 
 ## Architecture invariants (keep these)
 
-- **Logging:** ESP_LOGx → Zephyr LOG via `include/app_log.h` shim. Every `.c` that logs must
-  `LOG_MODULE_REGISTER(jb_<name>, …)` *before* including `app_log.h`.
+- **Logging:** ESP_LOGx → Zephyr LOG via `include/app_log.h` shim. LOG modules are grouped by
+  subsystem (`jb_app`, `jb_ble`, `jb_codec`, `jb_ctrl`, `jb_storage`, `jb_usb`): the subsystem's
+  primary `.c` does `LOG_MODULE_REGISTER(jb_<subsys>, …)` and its other files
+  `LOG_MODULE_DECLARE(jb_<subsys>, …)`, *before* including `app_log.h`. A significant event that must
+  survive offline (battery, no console) is recorded with the Unreal-`UE_LOG`-style
+  `JOURNAL(Category, Verbosity, Target, …)` macro (`<journal/journal.h>`): `Verbosity` → console
+  `LOG_*` level, `Target` ∈ `Console`/`Flash`/`All` picks the sink. It replaced the old
+  `ESP_LOGI(…) + jb_trace(…)` dual-write. See *Persistent event journal*.
 - **Portable core stays host-agnostic:** controller / codec never include
   `<zephyr/bluetooth/*>`; they go through `include/ble/ble_iface.h`. All NimBLE→Zephyr glue is
   confined to `src/ble/`.
@@ -127,10 +136,10 @@ there is no separate byte-stream input transport.
 **Why it's a from-scratch driver:** upstream Zephyr has **no DWC2 host (UHC) driver** for the S3
 OTG core (`drivers/usb/uhc/` ships only max3421e / NXP mcux / virtual). XInput is also
 vendor-specific (interface class `0xFF`, subclass `0x5D`, protocol `0x01`), not USB-HID, so it
-needs a custom host class driver regardless. Both are written in-app:
+needs a custom host class driver regardless. The UHC driver is a reusable module; the class is in-app:
 
 ```
-src/usb_host/uhc_dwc2_esp32.{c,h}  native UHC host-controller driver over the Espressif USB HAL
+modules/uhc_dwc2_esp32/{src,include}/  native UHC host-controller driver (reusable Zephyr module)
 src/usb_host/xinput_class.c        USBH class driver (matches 0xFF/0x5D/0x01, polls interrupt-IN)
 src/usb_host/usb_host.c            usbh_init/enable; USBH_CONTROLLER_DEFINE bound to &usb_otg
 src/input/xinput_map.c             XInput 20-byte report -> Pro2 HID back buffer (+ hid_commit)
@@ -144,13 +153,13 @@ USB failure can't block the load-bearing BLE path. The UHC driver is single-acti
 runs one `uhc_transfer` at a time, the model the UHC layer is built around — cf. `uhc_max3421e`).
 
 **Build wiring (load-bearing — the host HAL is NOT compiled by default):**
-- `CONFIG_UHC_DWC2=y` (app symbol in `Kconfig.dwc2`) makes hal_espressif compile `usb_wrap_hal.c`
-  — its `zephyr/esp32s3/CMakeLists.txt:~295` already gates on this exact symbol.
-- `CMakeLists.txt` additionally pulls the host HAL sources the module still doesn't compile:
-  `esp_hal_usb/{usb_dwc_hal.c, usb_serial_jtag_hal.c, ${SOC}/usb_dwc_periph.c}` +
-  `esp_hw_support/usb_phy/usb_phy.c` (via `${ZEPHYR_HAL_ESPRESSIF_MODULE_DIR}`), and adds private
-  include dirs `${ZEPHYR_BASE}/drivers/usb/uhc` + `${ZEPHYR_BASE}/subsys/usb/host` (uhc_common.h /
-  usbh_device.h / usbh_class.h — the same private headers the in-tree UVC host class uses).
+- `CONFIG_UHC_DWC2=y` (now in the `modules/uhc_dwc2_esp32` module Kconfig) makes hal_espressif compile
+  `usb_wrap_hal.c` — its `zephyr/esp32s3/CMakeLists.txt:~295` already gates on this exact symbol.
+- The **module's** `zephyr/CMakeLists.txt` pulls the host HAL sources hal_espressif still doesn't
+  compile — `esp_hal_usb/{usb_dwc_hal.c, usb_serial_jtag_hal.c, ${SOC}/usb_dwc_periph.c}` +
+  `esp_hw_support/usb_phy/usb_phy.c` (via `${ZEPHYR_HAL_ESPRESSIF_MODULE_DIR}`) — and adds the private
+  include `${ZEPHYR_BASE}/drivers/usb/uhc` (uhc_common.h). The **app** `CMakeLists.txt` keeps only
+  `${ZEPHYR_BASE}/subsys/usb/host` (usbh_device.h / usbh_class.h) for the in-app `xinput_class.c`.
 - `boards/esp32s3_devkitc_procpu.overlay` enables `&usb_otg` (its `espressif,esp32-usb-otg` binding includes `snps,dwc2.yaml`
   → reg/interrupts/clocks; UDC device mode stays off so nothing else binds it). PHY is brought up
   in host mode via `usb_new_phy({CTRL_OTG, TARGET_INT, OTG_MODE_HOST, SPEED_FULL})`.
@@ -263,50 +272,87 @@ cmd-`0x15` + level 4 (erase the bond first — see the script header — else yo
 reconnect). Example traces: `docs/ns2_pair_capture.txt` (fresh pair, full `0x15` exchange) and
 `docs/ns2_reconnect_capture.txt` (auto-reconnect, which skips `0x15`).
 
-## Persistent event trace (offline diagnostics)
+## Persistent event journal (offline diagnostics)
 
-`CONFIG_JOY_BRIDGE_PERSIST_LOG=y` (on by default in `prj.conf`) records a curated, low-rate trace
-of significant runtime events to flash so the device's behaviour while running **offline** — on
-battery, with no serial console attached — can be reviewed after the fact. Captured (via `jb_trace()`
-calls co-located with the existing `LOG_*` lines, so live serial is unchanged): boot + reset cause,
-BLE connect (NS2 addr + interval), disconnect + HCI reason, security level, conn-interval updates,
-deep-sleep entry, and USB XInput bind/removal. `src/app/trace.c` + `include/trace.h`; compiles to
-nothing when the symbol is off (verified clean under `-Werror`).
+`CONFIG_JOURNAL=y` (on by default in `prj.conf`) records a curated, low-rate trace of significant
+runtime events to flash so the device's behaviour while running **offline** — on battery, with no
+serial console attached — can be reviewed after the fact. Provided by the reusable in-tree Zephyr
+module **`journal`** (`modules/journal/`, wired via `ZEPHYR_EXTRA_MODULES` in `CMakeLists.txt`), which
+is project-agnostic — it hardcodes no BLE/devicetree specifics and can be lifted into its own repo for
+other projects. API in `modules/journal/include/journal/journal.h`:
+
+- `JOURNAL(Category, Verbosity, Target, fmt, …)` — an Unreal-`UE_LOG`-style macro. `Category` is a
+  bare **UPPERCASE concern tag** — `CONN` (connect/disconnect/conn-interval), `SEC` (security), `PWR`
+  (sleep), `PAD` (USB controller) — chosen *orthogonal to* the Zephyr module so it never just echoes
+  the file name (the module already does that); prefixed as `[CAT]` to console + flash. `Verbosity`
+  uses UE's names (`Fatal`/`Error`/`Warning`/`Display`/`Log`/`Verbose`/`VeryVerbose`) → the console
+  `LOG_*` level; `Target` picks the sink — `Console` (live log only), `Flash` (persistent journal
+  only), or `All` (both). `Fatal` always does both + `journal_flush()` + `k_panic()`.
+  `JOURNAL_IF(cond, …)` = UE_CLOG. It replaced the old `ESP_LOGI(…) + jb_trace(…)` dual-write at the
+  connect / disconnect / conn-interval / security / deep-sleep / USB-bind sites (e.g.
+  `(CONN, Display, All)`).
+- `journal_put(fmt, …)` — low-level persist-only primitive (the macro's `Flash` path);
+  `journal_flush()` — synchronous drain, called in `ns2_sleep_work_fn` before `log_panic()`.
+- `journal_init(area_id, gate)` — first call in `main()`; mounts the ring, replays the stored trace,
+  appends a boot marker (reset cause). joy_bridge passes `PARTITION_ID(log_partition)` and the
+  write-gate `ble_hid_ready` (below).
+
+Captured: boot + reset cause, BLE connect (NS2 addr + interval), disconnect + HCI reason, security
+level, conn-interval updates, deep-sleep entry, and USB XInput bind/removal. Compiles to nothing when
+`CONFIG_JOURNAL` is off (verified clean under `-Werror`).
+
+**Verified on hardware 2026-06-27** (ESP32-S3-DevKitC + a real paired NS2): the UE-style lines flow on
+the live console with their UPPERCASE concern-category prefixes — `jb_ble: [CONN] connect NS2 … itvl=12
+(15.00 ms) lat=0 to=200`, `jb_usb: [PAD] XInput bound … bInt=1 pool=4/4`, `jb_ble: [SEC]
+security level=4 err=0` (the category no longer echoes the module name) — **and** persist to flash, the
+boot replay (`==== journal ==== … ==== end journal ====`) dumping the stored entries. The write-gate
+behaves: entries drain only after the link settles at L4. Crucially, **NS2 still pairs to security
+level 4** with the logging refactor in place (the load-bearing invariant is intact). The
+**disconnect → deep-sleep flush** path was confirmed in an earlier run (identical mechanism; the lines
+are now tagged `[CONN] disconnect reason=0x13` and `[PWR] deep sleep (NS2 off)`): `journal_flush()`
+persisted both to flash before `sys_poweroff()`, the UART went silent, and a BOOT-button wake (RTC
+fast-boot — no ROM `rst:` banner) replayed them. Non-`Display` verbosities are compile-verified only
+(no call site uses them yet).
 
 - **Never write flash inline — DO NOT REGRESS (hard-won on hardware).** Writing the on-chip SPI
   flash stalls the XIP instruction cache for the duration of the write. During the **boot log-burst**
   and the **NS2 pairing handshake** that corrupts the log backend (live console goes permanently
   silent) and **breaks pairing (security never reaches L4)** — verified by isolating the writes on
-  hardware. A write once the link is *settled* (post-L4, HID flowing) is tolerated. So `jb_trace()`
-  only formats the line and pushes it to a small RAM ring (`PEND_SLOTS`); it does **no flash I/O** and
-  is safe from any context, including the BLE/USB callbacks during pairing. A low-priority worker
-  (`flush_thread_fn`, `K_LOWEST_APPLICATION_THREAD_PRIO`) drains the ring to flash every ~2 s **only
-  while `ble_hid_ready()`** (settled link), a few lines per cycle. `jb_trace_flush()` drains the ring
-  **synchronously before deep sleep** (link already down → safe), called in `ns2_sleep_work_fn` before
-  `log_panic()`. Cost: an abrupt power loss (battery yank) mid-session loses at most the last ~2 s of
-  unflushed events; a clean session end (NS2-off deep sleep, or disconnect) flushes everything.
+  hardware. A write once the link is *settled* (post-L4, HID flowing) is tolerated. So `JOURNAL()` /
+  `journal_put()` only format the line and push it to a small RAM ring (`CONFIG_JOURNAL_PEND_SLOTS`);
+  they do **no flash I/O** and are safe from any context, including the BLE/USB callbacks during
+  pairing. A low-priority worker (`flush_thread_fn`, `K_LOWEST_APPLICATION_THREAD_PRIO`) drains the
+  ring to flash every ~2 s (`CONFIG_JOURNAL_DRAIN_PERIOD_MS`) **only while the write-gate returns
+  true** — joy_bridge wires the gate to `ble_hid_ready()` (settled link), so the module stays
+  BLE-agnostic while the load-bearing "settled-link only" rule is preserved. `journal_flush()` drains
+  **synchronously before deep sleep** (link already down → safe). Cost: an abrupt power loss (battery
+  yank) mid-session loses at most the last ~2 s of unflushed events; a clean session end (NS2-off deep
+  sleep, or disconnect) flushes everything.
 - **Backed by FCB on its OWN partition (`log_partition`)** — Zephyr's power-fail-safe Flash Circular
   Buffer. It never touches the settings/NVS partition that holds the load-bearing NS2 bond. The
   worker's write is `fcb_append`→`flash_area_write`→`append_finish`, 4-byte aligned (S3
   `write-block-size=4`); the line is padded and FCB records the true length so read-back is clean. The
-  ring auto-rotates (erase-oldest) when full.
-- **Retrieval — replay on boot:** on the next boot `jb_trace_init()` (first call in `main()`) dumps
-  the most recent `TRACE_DUMP_LAST_N` (100) entries straight to the console UART via `uart_poll_out`
-  (not the deferred log backend, which would drop a multi-line burst), bracketed by
-  `==== persisted trace ====`. The dump is bounded (`fcb_offset_last_n`) because the ring holds
-  thousands of lines before it wraps and the whole thing goes out byte-by-byte at 115200. So: plug into the
-  PC, open the serial monitor, tap EN/RESET (or BOOT) → the offline session prints. Reset cause in
-  the boot marker decodes battery/offline events: `RESET_BROWNOUT 0x04` (battery sag), `RESET_POR
-  0x08`, `RESET_LOW_POWER_WAKE 0x80` (NS2-off deep-sleep wake), `RESET_PIN 0x01` (EN/RESET).
-- **Retrieval — esptool pull** (no reboot): `esptool read-flash 0xfc0000 0x40000 trace.bin` then
-  `strings trace.bin`.
+  ring auto-rotates (erase-oldest) when full. The partition is **not** baked into the module — `main()`
+  passes its area id (`PARTITION_ID(log_partition)`) to `journal_init()`; another project supplies its
+  own via `FIXED_PARTITION_ID(...)`.
+- **Retrieval — replay on boot:** on the next boot `journal_init()` (first call in `main()`) dumps
+  the most recent `CONFIG_JOURNAL_DUMP_LAST_N` (100) entries straight to the console UART via
+  `uart_poll_out` (not the deferred log backend, which would drop a multi-line burst), bracketed by
+  `==== journal ====` / `==== end journal ====`. The dump is bounded (`fcb_offset_last_n`) because the
+  ring holds thousands of lines before it wraps and the whole thing goes out byte-by-byte at 115200.
+  So: plug into the PC, open the serial monitor, tap EN/RESET (or BOOT) → the offline session prints.
+  Reset cause in the boot marker decodes battery/offline events: `RESET_BROWNOUT 0x04` (battery sag),
+  `RESET_POR 0x08`, `RESET_LOW_POWER_WAKE 0x80` (NS2-off deep-sleep wake), `RESET_PIN 0x01` (EN/RESET).
+- **Retrieval — esptool pull** (no reboot): `esptool read-flash 0xfc0000 0x40000 journal.bin` then
+  `strings journal.bin`.
 - **Partition layout (load-bearing-adjacent):** the board overlay trims `storage_partition`'s tail
   from `0x1000000`→`0xfc0000` and carves `log_partition` = top 256 KB (`0xfc0000`, `0x40000`). The
   storage **start stays `0x3b0000`** and NVS fills from the start, so the existing bond (low sectors
   of a 12 MB partition) is untouched by removing the unused tail. `log_partition` needs
   `compatible = "zephyr,mapped-partition"` like every sibling in this AMP layout (the parent
   `partitions` node is not `fixed-partitions`, so `PARTITION_ID()` resolves via the mapped path —
-  without the compat the build fails with an undeclared `…_PARTITION_ID`).
+  without the compat the build fails with an undeclared `…_PARTITION_ID`). Unchanged by the move to the
+  module.
 
 ## If NS2 pairing regresses
 

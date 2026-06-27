@@ -13,7 +13,7 @@
 #include <errno.h>
 
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(jb_controller, CONFIG_JOY_BRIDGE_LOG_LEVEL);
+LOG_MODULE_REGISTER(jb_ctrl, CONFIG_JOY_BRIDGE_LOG_LEVEL);
 #include "app_log.h"
 
 controller_firmware_t g_controller_firmware = {

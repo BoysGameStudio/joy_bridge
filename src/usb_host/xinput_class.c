@@ -26,10 +26,10 @@
 #include "usbh_class.h"  /* USBH_CLASS_MATCH_*, USBH_CLASS_IFNUM_DEVICE */
 
 #include "input/xinput.h"
-#include "trace.h"
+#include <journal/journal.h>
 
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(jb_xinput_class, CONFIG_JOY_BRIDGE_LOG_LEVEL);
+LOG_MODULE_DECLARE(jb_usb, CONFIG_JOY_BRIDGE_LOG_LEVEL);
 
 /* XInput (Xbox 360) interface signature. */
 #define XINPUT_IF_CLASS 0xFF
@@ -227,9 +227,8 @@ static int xinput_probe(struct usbh_class_data *const c_data,
 		return -EIO;
 	}
 
-	LOG_INF("XInput controller bound (iface %u, ep 0x%02x, mps %u, bInterval %u, pool %d/%d)",
+	JOURNAL(PAD, Display, All, "XInput bound iface=%u ep=0x%02x mps=%u bInt=%u pool=%d/%d",
 		iface, ep_addr, ep_mps, ep_interval, submitted, XINPUT_NUM_XFERS);
-	jb_trace("XInput bound iface=%u ep=0x%02x mps=%u", iface, ep_addr, ep_mps);
 	return 0;
 }
 
@@ -251,8 +250,7 @@ static int xinput_removed(struct usbh_class_data *const c_data)
 	/* Park the emulated controller at neutral so a removed pad does not leave
 	 * buttons stuck pressed on the console. */
 	xinput_map_neutral();
-	LOG_INF("XInput controller removed");
-	jb_trace("XInput removed");
+	JOURNAL(PAD, Display, All, "XInput controller removed");
 	return 0;
 }
 

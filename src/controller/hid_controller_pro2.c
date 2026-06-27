@@ -8,7 +8,7 @@
 #include <stdlib.h>
 
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(jb_hid_pro2, CONFIG_JOY_BRIDGE_LOG_LEVEL);
+LOG_MODULE_DECLARE(jb_ctrl, CONFIG_JOY_BRIDGE_LOG_LEVEL);
 #include "app_log.h"
 
 const uint8_t pro2_firmware_info[12] = {

@@ -18,7 +18,7 @@
 #include <zephyr/usb/usbh.h>
 
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(jb_usb_host, CONFIG_JOY_BRIDGE_LOG_LEVEL);
+LOG_MODULE_REGISTER(jb_usb, CONFIG_JOY_BRIDGE_LOG_LEVEL);
 
 USBH_CONTROLLER_DEFINE(xinput_uhs, DEVICE_DT_GET(DT_NODELABEL(usb_otg)));
 

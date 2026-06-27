@@ -4,7 +4,7 @@
 #include "utils.h"
 
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(jb_log, CONFIG_JOY_BRIDGE_LOG_LEVEL);
+LOG_MODULE_DECLARE(jb_app, CONFIG_JOY_BRIDGE_LOG_LEVEL);
 #include "app_log.h"
 
 void log_print_ltk_hex(const char *data_name, const uint8_t *data) {

@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Declares `journal` as a Zephyr module. A consuming project adds it with:
+#   list(APPEND ZEPHYR_EXTRA_MODULES <path>/modules/journal)
+# before find_package(Zephyr ...), or via a west manifest entry.
+name: journal
+build:
+  cmake: zephyr
+  kconfig: zephyr/Kconfig
