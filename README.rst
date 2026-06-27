@@ -27,6 +27,11 @@ Status
 - **NS2 sleep → deep sleep:** when the NS2 sleeps and the link drops, the bridge
   deep-sleeps (~10 µA) instead of re-advertising (which would wake the console
   back up). Tap BOOT to wake → reconnect (``CONFIG_JOY_BRIDGE_SLEEP_ON_NS2_OFF``).
+- **Offline event journal:** significant events (boot + reset cause, BLE connect /
+  disconnect, security level, conn-interval, deep sleep, USB bind) are mirrored to a
+  power-fail-safe flash ring via the ``JOURNAL`` macro and replayed to the console on
+  the next boot — so a headless / battery session can be reviewed after the fact
+  (``CONFIG_JOURNAL``; the reusable ``modules/journal`` module).
 - Builds clean under ``-Werror`` (twister ``build_only`` suite).
 
 USB Host / XInput mode
@@ -37,11 +42,12 @@ USB-OTG port is read in USB host mode and mapped onto the emulated Pro2. Enabled
 by ``CONFIG_JOY_BRIDGE_USB_XINPUT`` (default on for this build).
 
 Upstream Zephyr has no DWC2 host (UHC) driver for the S3 OTG core, so this adds a
-from-scratch one (``src/usb_host/uhc_dwc2_esp32.c``) over the vendored Espressif
-USB HAL, plus a USBH XInput class driver (``src/usb_host/xinput_class.c``, matches
-interface class ``0xFF`` / subclass ``0x5D`` / protocol ``0x01``) and the
-XInput→Pro2 mapping (``src/input/xinput_map.c``). Face buttons map by physical
-position (bottom button → Switch "B"); analog triggers map to digital ZL/ZR.
+from-scratch one over the vendored Espressif USB HAL, packaged as the reusable
+Zephyr module ``modules/uhc_dwc2_esp32`` (``CONFIG_UHC_DWC2``). On top of it sit a
+USBH XInput class driver (``src/usb_host/xinput_class.c``, matches interface class
+``0xFF`` / subclass ``0x5D`` / protocol ``0x01``) and the XInput→Pro2 mapping
+(``src/input/xinput_map.c``). Face buttons map by physical position (bottom
+button → Switch "B"); analog triggers map to digital ZL/ZR.
 
 **Hardware note (VBUS).** The controller plugs into the S3's native USB port
 (D+ = GPIO20, D- = GPIO19). That port must supply **5 V VBUS** to power the
@@ -77,14 +83,17 @@ Source layout
 
    include/            public headers (mirrors upstream main/include)
    src/
-     app/        device state, utils, logging shim
+     app/        device state, utils, ESP->Zephyr logging shim
      controller/ HID report engine (pro2)
      codec/      NS2 codec (ns2_codec / pro2 / ns2)
      ble/        Zephyr bt host glue (ble / gatt / ble_store)
      storage/    settings-backed persistence
      input/      XInput -> Pro2 report mapping
-     usb_host/   native DWC2 USB host driver + USBH XInput class driver
+     usb_host/   USBH XInput class driver + host glue (usbh_init)
      main.c      init sequence
+   modules/            reusable in-tree Zephyr modules (ZEPHYR_EXTRA_MODULES)
+     journal/         flash-backed offline event log (the JOURNAL macro)
+     uhc_dwc2_esp32/  native ESP32-S3 DWC2 USB host-controller driver
 
 Building and Running
 ********************

@@ -339,7 +339,7 @@ fast-boot — no ROM `rst:` banner) replayed them. Non-`Display` verbosities are
 - **Retrieval — replay on boot:** on the next boot `journal_init()` (first call in `main()`) dumps
   the most recent `CONFIG_JOURNAL_DUMP_LAST_N` (100) entries straight to the console UART via
   `uart_poll_out` (not the deferred log backend, which would drop a multi-line burst). No delimiter
-  lines — replayed records (`<uptime_ms> [CAT] msg`) are distinguishable by format from the live log
+  lines — replayed records (`HH:MM:SS.mmm [CAT] msg`) are distinguishable by format from the live log
   (`[hh:mm:ss] <inf> …`) that follows. The dump is bounded (`fcb_offset_last_n`) because the
   ring holds thousands of lines before it wraps and the whole thing goes out byte-by-byte at 115200.
   So: plug into the PC, open the serial monitor, tap EN/RESET (or BOOT) → the offline session prints.

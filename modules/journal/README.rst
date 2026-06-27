@@ -36,7 +36,9 @@ API
    JOURNAL(Category, Verbosity, Target, fmt, ...);
    JOURNAL_IF(cond, Category, Verbosity, Target, fmt, ...);   /* = UE_CLOG */
 
-   /* Category  — bare subsystem token, prefixed as "[Category]".
+   /* Category  — bare UPPERCASE concern tag (e.g. LINK, NET, PWR), chosen
+    *             orthogonal to the LOG module so it adds info, not the file name;
+    *             prefixed as "[CATEGORY]".
     * Verbosity — UE names -> console log level:
     *   Fatal->LOG_ERR(+flush+k_panic)  Error->LOG_ERR  Warning->LOG_WRN
     *   Display/Log->LOG_INF  Verbose/VeryVerbose->LOG_DBG
@@ -66,16 +68,17 @@ Using it in a project
 3. Initialise early in ``main()`` and record events::
 
        journal_init(FIXED_PARTITION_ID(my_log), my_write_gate);
-       JOURNAL(Ble, Display, All,     "link up itvl=%u", itvl);
-       JOURNAL(Usb, Warning, Console, "stall ep=0x%02x", ep);
+       JOURNAL(LINK, Display, All,     "link up itvl=%u", itvl);
+       JOURNAL(USB,  Warning, Console, "stall ep=0x%02x", ep);
 
 Retrieval
 ---------
 
 On the next boot ``journal_init()`` dumps the most recent
 ``CONFIG_JOURNAL_DUMP_LAST_N`` entries straight to the console (no delimiter lines —
-replayed records print as ``<uptime_ms> [CAT] msg``, distinguishable by format from
-the timestamped live log that follows). The raw partition is also readable
+replayed records print as ``HH:MM:SS.mmm [CAT] msg`` (uptime since boot),
+distinguishable by format from the timestamped live log that follows). The raw
+partition is also readable
 out-of-band (e.g. ``esptool read-flash`` then ``strings``).
 
 Tunables (Kconfig, under ``CONFIG_JOURNAL``)
