@@ -28,7 +28,10 @@ typedef struct {
     uint16_t rsp_len;
 } pro2_gatt_rsp_t;
 
-/** @brief Command handler; returns the response data length. */
+/** @brief Command handler; returns the response data length. data_out is a
+ * CMD_PROCESS_MAX_RSP_DATA_LEN (0x78) buffer: the handler MUST bound its own
+ * writes, since the post-hoc length check in cmd_process() can only run after
+ * the handler has already written. */
 typedef uint8_t (*cmd_handler)(const uint8_t subcmd, const uint16_t payload_len,
                                const uint8_t *data_in, uint8_t *data_out);
 
