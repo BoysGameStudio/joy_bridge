@@ -47,6 +47,11 @@ void controller_type_init(void) {
     if (ret != 0) {
         ESP_LOGW(LOG_BLE_NVS, "Controller type not in storage, defaulting to PRO2");
         type = CONTROLLER_TYPE_PRO2;
+    } else if (type != CONTROLLER_TYPE_PRO2 && type != CONTROLLER_TYPE_JOYCON) {
+        /* A corrupted/unknown stored value must not silently disable the
+         * controller (init would fail -ENOSYS and pairing would be dead). */
+        ESP_LOGW(LOG_BLE_NVS, "Unknown stored controller type %d; forcing PRO2", type);
+        type = CONTROLLER_TYPE_PRO2;
     } else {
         ESP_LOGI(LOG_BLE_NVS, "Controller type loaded from storage: %d", type);
     }
