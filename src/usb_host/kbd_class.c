@@ -146,6 +146,23 @@ static int kbd_in_cb(struct usb_device *udev, struct uhc_transfer *xfer)
 		return 0;
 	}
 
+	/* DIAG: surface the silent failure modes — errored completions and short
+	 * reports are otherwise invisible (the poll just re-arms). Rate-limited to
+	 * every 32nd occurrence per class so a continuous error loop is countable
+	 * without flooding the log. */
+	if (xfer->err != 0) {
+		static uint32_t err_seen[8];
+		uint8_t slot = (uint8_t)(-xfer->err < 8 ? -xfer->err : 8) - 1u;
+		if ((++err_seen[slot] & 0x1Fu) == 1u) {
+			LOG_WRN("kbd IN xfer err=%d x%u", xfer->err, err_seen[slot]);
+		}
+	} else if (xfer->buf != NULL && xfer->buf->len < KBD_BOOT_REPORT_LEN) {
+		static uint32_t short_seen;
+		if ((++short_seen & 0x1Fu) == 1u) {
+			LOG_WRN("kbd IN short len=%u x%u", xfer->buf->len, short_seen);
+		}
+	}
+
 	if (xfer->err == 0 && xfer->buf != NULL &&
 	    xfer->buf->len >= KBD_BOOT_REPORT_LEN) {
 		kbd_map_report(xfer->buf->data, xfer->buf->len);
