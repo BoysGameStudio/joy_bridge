@@ -218,15 +218,22 @@ Each was found by capturing the failing flow over serial and cross-checking the 
   (one channel runs one `uhc_transfer` at a time), so this is the cheap, in-class half of the old
   "continuous multi-buffer poll" follow-up; a fully continuous periodic multi-QTD scheme (the ESP-IDF
   HCD model) inside the driver remains the deeper option if the rate still needs lifting. Measure with
-  `CONFIG_JOY_BRIDGE_DIAG_LATENCY=y` (XInput rate + arrival→notify latency, once/sec) — it auto-selects
-  `UHC_DWC2_DIAG_LATENCY` (the in-driver completion→re-arm probe). The HID report thread caps sends at
-  `CONFIG_HID_REPORT_INTERVAL` (**15 ms** — the default). A 5 ms cadence (to match the fast link) was
-  tried and **regressed input on hardware**: the NS2 periodically power-saves the link to ~30 ms, and
-  5 ms sends then overrun the small BLE TX buffer pool (the "12 != 10" ACL/tx-context margin) →
-  notifies stall/`-ENOMEM` → reports stop reaching the console (`-12` on every notify, 14 ms latency).
-  Lowering latency safely needs a cadence that tracks the *negotiated* connection interval rather than
-  a fixed value — open follow-up. Button/stick *changes* still register promptly (XInput reports on
-  change).
+  `CONFIG_JOY_BRIDGE_DIAG_LATENCY=y` (input rate + arrival→notify latency, once/sec; both
+  `xinput_map.c` and `kbd_map.c` stamp arrivals) — it auto-selects
+  `UHC_DWC2_DIAG_LATENCY` (the in-driver completion→re-arm probe). **Report pacing (DONE —
+  interval-tracking + burst, `src/controller/report_pacer.c`):** the report thread's send grid
+  tracks the negotiated connection interval (clamped 5–30 ms, read via
+  `ble_hid_conn_interval_ms()` from ble.c's `on_connected`/`on_le_param_updated`) and fresh
+  committed input sends immediately under a token-bucket burst (`CONFIG_JOY_BRIDGE_REPORT_BURST`,
+  default 3); dense streams degrade to the grid. `CONFIG_HID_REPORT_INTERVAL` (15 ms) is only the
+  no-link fallback now. This replaced the fixed 15 ms cap after measurement showed it dominated
+  input latency (in→notify avg 7.5 ms, max ~15 ms — the uniform(0,15) grid wait); with the pacer
+  the same measurement is **avg ~0.55 ms, max <1 ms** at the 5 ms link (~13× better), with zero
+  `-ENOMEM` including through a ~30 ms power-save episode (the grid backs off with the link). A
+  FIXED 5 ms cadence had regressed on hardware before (NS2 power-saves to ~30 ms → TX pool
+  "12 != 10" overrun → `-ENOMEM` stalls); tracking + drop-on-failure is why the pacer is safe
+  where fixed 5 ms was not. The pacer is pure C (no Zephyr deps), unit-tested in
+  `tests/report_pacer/` like the keyboard parser.
 - **VBUS (hardware):** the internal PHY host mode does NOT source VBUS, and the DevKitC native USB-C
   VBUS is Schottky-isolated from 5 V — so the pad (or keyboard) gets no power and never enumerates
   (LEDs dark). No firmware fix on a stock DevKitC: power the device externally / direct-attach it
