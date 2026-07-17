@@ -95,7 +95,7 @@ static void pro2_set_button_custom(controller_hid_report_t *report, uint8_t *dat
 }
 
 static uint8_t *pro2_next_report(controller_hid_report_t *report) {
-    if (report == NULL) return NULL;
+    if (report == NULL || report->report == NULL) return NULL;
     hid_report_pro2_t *hid_report = (hid_report_pro2_t *)report->report;
     hid_report->counter++;
     return (uint8_t *)report->report;

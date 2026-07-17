@@ -178,8 +178,18 @@ static void controller_task(void *p1, void *p2, void *p3) {
 #endif
             ctrl->buffer.swap_request = 0;
             uint8_t *next_report = ctrl->hid_ops->next_report(ctrl->buffer.front_buffer);
-            memcpy(report_buffer, next_report, report_size);
+            if (next_report != NULL) {
+                memcpy(report_buffer, next_report, report_size);
+            }
             k_sched_unlock();
+
+            if (next_report == NULL) {
+                /* Report payload was never allocated (init malloc failed) —
+                 * nothing safe to send; back off instead of dereferencing. */
+                ESP_LOGE(LOG_HID, "no report payload; skipping send");
+                k_msleep(HID_REPORT_INTERVAL);
+                continue;
+            }
 
             int rc = ble_hid_notify(report_buffer, report_size);
             if (rc != 0) {
