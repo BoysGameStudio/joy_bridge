@@ -36,8 +36,12 @@ export ZEPHYR_SDK_INSTALL_DIR=/Users/alan/Zephyr/zephyr-sdk-1.0.1
   (`CONFIG_COMPILER_WARNINGS_AS_ERRORS=y`), so deprecations that a plain `west build` only
   *warns* about will FAIL CI — always verify under `-Werror` before declaring green.
 - **Unit tests (host):** `twister -T tests/kbd_parse -p native_sim -c -O twister-out-kbd --inline-logs`
-  runs the boot-keyboard parser ztest suite on the host. On macOS native_sim is env-filtered — use
-  `-p qemu_x86` instead. Can be appended to the esp32 gate command for one-shot CI.
+  runs the boot-keyboard parser ztest suite on the host (same for `tests/report_pacer`). On macOS
+  native_sim is env-filtered — use `-p qemu_x86` instead. **One-shot CI (all suites):**
+  `twister -T . -p esp32s3_devkitc/esp32s3/procpu -p qemu_x86 -c -O twister-out --inline-logs` —
+  the root suite's `platform_allow` restricts it to esp32 (`build_only`), the two ztest suites
+  build+run on qemu_x86 (on Linux CI, add `-p native_sim`): 0 errored + 16/16 test cases is the
+  full pass.
 
 ## Source layout
 
