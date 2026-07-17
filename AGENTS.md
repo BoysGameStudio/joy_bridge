@@ -35,6 +35,9 @@ export ZEPHYR_SDK_INSTALL_DIR=/Users/alan/Zephyr/zephyr-sdk-1.0.1
   `0 errored` is the pass. Twister builds with `-Werror`
   (`CONFIG_COMPILER_WARNINGS_AS_ERRORS=y`), so deprecations that a plain `west build` only
   *warns* about will FAIL CI — always verify under `-Werror` before declaring green.
+- **Unit tests (host):** `twister -T tests/kbd_parse -p native_sim -c -O twister-out-kbd --inline-logs`
+  runs the boot-keyboard parser ztest suite on the host. On macOS native_sim is env-filtered — use
+  `-p qemu_x86` instead. Can be appended to the esp32 gate command for one-shot CI.
 
 ## Source layout
 
@@ -149,7 +152,7 @@ include/input/xinput.h, include/usb_host.h
 Data path: pad → `uhc_dwc2_esp32` (UHC) → Zephyr USBH stack → `xinput_class` (claims the gamepad
 interface, keeps a small pool of interrupt-IN polls queued) → `xinput_map_report()` →
 `g_hid_controller` back buffer → existing HID report thread → NS2. `main.c` calls
-`xinput_host_start()` **after** BLE init so a USB failure can't block the load-bearing BLE path. The
+`usb_host_start()` **after** BLE init so a USB failure can't block the load-bearing BLE path. The
 UHC driver is single-active (one channel runs one `uhc_transfer` at a time, the model the UHC layer
 is built around — cf. `uhc_max3421e`); the class-side pool keeps that one channel from idling
 between polls (see *Known characteristics*).
@@ -224,10 +227,11 @@ Each was found by capturing the failing flow over serial and cross-checking the 
   a fixed value — open follow-up. Button/stick *changes* still register promptly (XInput reports on
   change).
 - **VBUS (hardware):** the internal PHY host mode does NOT source VBUS, and the DevKitC native USB-C
-  VBUS is Schottky-isolated from 5 V — so the pad gets no power and never enumerates (LEDs dark). No
-  firmware fix on a stock DevKitC: power the pad externally / direct-attach it (power-injecting OTG
-  cable, or wire 5 V to the OTG VBUS; D+=GPIO20/D-=GPIO19). **Zephyr USBH has no hub support** — the
-  pad must be on the root port, so a powered hub will NOT work. If a GPIO load switch is added, set
+  VBUS is Schottky-isolated from 5 V — so the pad (or keyboard) gets no power and never enumerates
+  (LEDs dark). No firmware fix on a stock DevKitC: power the device externally / direct-attach it
+  (power-injecting OTG cable, or wire 5 V to the OTG VBUS; D+=GPIO20/D-=GPIO19). **Zephyr USBH has
+  no hub support** — the device must be on the root port, so a powered hub will NOT work. If a GPIO
+  load switch is added, set
   `usb_phy` `otg_io_conf.drvvbus_io_num` to drive it.
 - **IN transfer-size MPS rounding:** `uhc_dwc2_begin_stage()` passes `net_buf_tailroom` as the IN
   length verbatim (not rounded to MPS) — fine for the 8/64-byte control + 32-byte interrupt reads
@@ -238,6 +242,40 @@ Each was found by capturing the failing flow over serial and cross-checking the 
   controller init/LED command needed. Tunables in `xinput_map.c`: trigger threshold, optional stick
   deadzone, physical-vs-label button map.
 - **Scope:** Xbox 360 XInput protocol only (20-byte report); Xbox One/Series (GIP) is out of scope.
+
+### USB HID boot-protocol keyboard input
+
+A second input source: a wired **USB HID boot-protocol keyboard** on the OTG port, built when
+`CONFIG_JOY_BRIDGE_USB_KBD=y` (default in `prj.conf`). Zephyr has no in-tree USB host HID class,
+so `src/usb_host/kbd_class.c` is a from-scratch USBH class driver mirroring `xinput_class.c`:
+
+- **Scope: boot-protocol keyboards ONLY** — interface class `0x03` / subclass `0x01` / protocol
+  `0x01`. NKRO / report-protocol-only keyboards do not match the filter and silently do nothing.
+  No report-descriptor parsing, no keyboard LEDs, no hubs — so pad and keyboard are never attached
+  simultaneously; whichever device binds drives the input.
+- **Keymap table:** the single `static const` table lives in `src/input/kbd_parse.c` (pure parser,
+  zero Zephyr deps — unit-tested on host): WASD→LStick, IJKL→RStick, arrows→dpad,
+  Z/X/C/V→B/A/Y/X, Q/E→L/R, 1/3→ZL/ZR, Enter→Plus, Backspace→Minus, H→Home, P→Capture,
+  F/G→LClick/RClick. Opposing direction keys on one axis cancel to center; sticks center on release.
+- **Merge architecture (`src/input/input_merge.c`):** both mappers (`xinput_map.c`, `kbd_map.c`)
+  feed per-source contribution state into the merge composer, which is the **ONLY writer of the
+  HID back buffer** (guards + `set_button_custom`/`set_left_stick`/`set_right_stick`/`hid_commit`
+  call order identical to the pre-merge `xinput_map.c`). Semantics: buttons **OR**-ed across
+  sources; sticks **last-writer-wins** per stick event (monotonic stamp; ties resolve to XInput).
+  Compose runs under `k_sched_lock()` so the single-writer invariant holds from any USB callback
+  context.
+- **2-transfer interrupt-IN pool** (`KBD_NUM_XFERS 2`, vs the pad's 4): boot keyboards poll at
+  bInterval ≥ 8 ms at human input rates; 2 keeps one transfer queued while one completes — same
+  pipelining rationale as the pad, scaled to the rate. Never additive with the pad's pool (no hub).
+- **SET_PROTOCOL(BOOT) / SET_IDLE(0) STALL tolerance:** real keyboards legally STALL these class
+  requests, so `kbd_class.c` swallows `-EPIPE` from both (LOG_WRN each) and proceeds to the
+  interrupt-IN poll regardless; other negative errors fail the probe. The DWC2 driver's silent
+  control-retry explicitly never retries `-EPIPE`, so no interaction there.
+
+**Unit tests:** `tests/kbd_parse/` is a standalone ztest app compiling only `src/input/kbd_parse.c`
+(proves parser purity). Run: `twister -T tests/kbd_parse -p native_sim -c -O twister-out-kbd --inline-logs`
+(on macOS native_sim is env-filtered — use `-p qemu_x86` instead; can also be appended to the esp32
+gate command for one-shot CI).
 
 ## Current state & known gaps
 

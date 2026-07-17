@@ -55,13 +55,13 @@ int main(void) {
         ESP_LOGI(LOG_APP, "BLE stack initialized");
     }
 
-#ifdef CONFIG_JOY_BRIDGE_USB_XINPUT
-    /* USB host (XInput controller input). Started after BLE — the load-bearing
-     * path comes up first, and a USB failure must never block it. */
-    if (xinput_host_start() == 0) {
-        ESP_LOGI(LOG_APP, "USB host (XInput) started");
+#if defined(CONFIG_JOY_BRIDGE_USB_XINPUT) || defined(CONFIG_JOY_BRIDGE_USB_KBD)
+    /* USB host (XInput pad / HID keyboard input). Started after BLE — the
+     * load-bearing path comes up first, and a USB failure must never block it. */
+    if (usb_host_start() == 0) {
+        ESP_LOGI(LOG_APP, "USB host started");
     } else {
-        ESP_LOGE(LOG_APP, "USB host (XInput) start failed; continuing without host input");
+        ESP_LOGE(LOG_APP, "USB host start failed; continuing without host input");
     }
 #endif
 

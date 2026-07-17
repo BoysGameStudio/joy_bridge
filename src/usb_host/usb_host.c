@@ -1,17 +1,17 @@
 /*
- * USB host bring-up for the XInput controller bridge.
+ * USB host bring-up for the input-device bridge.
  *
  * Defines the USB host support context bound to the native ESP32-S3 USB-OTG
- * host controller (uhc_dwc2_esp32) and starts the host stack. The XInput class
- * driver (xinput_class.c) self-registers and claims a controller when one is
- * plugged in.
+ * host controller (uhc_dwc2_esp32) and starts the host stack. The class
+ * drivers (xinput_class.c / kbd_class.c) self-register and claim an input
+ * device when one is plugged in.
  */
 
 #include "usb_host.h"
 
 #include <zephyr/kernel.h>
 
-#ifdef CONFIG_JOY_BRIDGE_USB_XINPUT
+#if defined(CONFIG_JOY_BRIDGE_USB_XINPUT) || defined(CONFIG_JOY_BRIDGE_USB_KBD)
 
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
@@ -22,7 +22,7 @@ LOG_MODULE_REGISTER(jb_usb, CONFIG_JOY_BRIDGE_LOG_LEVEL);
 
 USBH_CONTROLLER_DEFINE(xinput_uhs, DEVICE_DT_GET(DT_NODELABEL(usb_otg)));
 
-int xinput_host_start(void)
+int usb_host_start(void)
 {
 	int ret;
 
@@ -38,8 +38,8 @@ int xinput_host_start(void)
 		return ret;
 	}
 
-	LOG_INF("USB host enabled; waiting for an XInput controller");
+	LOG_INF("USB host enabled; waiting for an input device (XInput pad / HID keyboard)");
 	return 0;
 }
 
-#endif /* CONFIG_JOY_BRIDGE_USB_XINPUT */
+#endif /* CONFIG_JOY_BRIDGE_USB_XINPUT || CONFIG_JOY_BRIDGE_USB_KBD */

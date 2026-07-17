@@ -60,6 +60,21 @@ root port (a powered hub will not enumerate).
 Scope: wired Xbox 360 / XInput-compatible controllers only; Xbox One/Series (GIP)
 is out of scope.
 
+Input sources
+=============
+
+Two wired input devices can drive the emulated Pro2 over USB host (never both at
+once — Zephyr USBH has no hub support, so whichever binds drives the input): a
+wired **XInput (Xbox 360) pad** (``CONFIG_JOY_BRIDGE_USB_XINPUT``) and a USB
+**HID boot-protocol keyboard** (``CONFIG_JOY_BRIDGE_USB_KBD``; interface class
+``0x03`` / subclass ``0x01`` / protocol ``0x01`` only — NKRO keyboards do not
+bind). Both feed a merge composer (``src/input/input_merge.c``), the single
+writer of the HID back buffer: buttons are OR-ed across sources, sticks are
+last-writer-wins per stick event (ties resolve to XInput). The keyboard keymap
+(WASD→left stick, arrows→dpad, Z/X/C/V→B/A/Y/X, Enter→Plus, …) lives in
+``src/input/kbd_parse.c`` and is unit-tested on the host
+(``tests/kbd_parse/``).
+
 5 ms connection interval
 ========================
 

@@ -41,12 +41,12 @@ file(GLOB_RECURSE app_sources CONFIGURE_DEPENDS
 
 target_sources(app PRIVATE ${app_sources})
 
-# ---- USB host (XInput) ------------------------------------------------------
+# ---- USB host (input devices) -----------------------------------------------
 # The native UHC host-controller driver now lives in the reusable module
-# modules/uhc_dwc2_esp32 (added to ZEPHYR_EXTRA_MODULES above). The in-app XInput
-# class driver (xinput_class.c) still uses the experimental USB host stack's
-# private class API (usbh_device.h / usbh_class.h) — no public header yet, same
-# as the in-tree UVC host class — so it needs that private include dir.
-if(CONFIG_JOY_BRIDGE_USB_XINPUT)
+# modules/uhc_dwc2_esp32 (added to ZEPHYR_EXTRA_MODULES above). The in-app class
+# drivers (xinput_class.c / kbd_class.c) still use the experimental USB host
+# stack's private class API (usbh_device.h / usbh_class.h) — no public header
+# yet, same as the in-tree UVC host class — so they need that private include dir.
+if(CONFIG_JOY_BRIDGE_USB_XINPUT OR CONFIG_JOY_BRIDGE_USB_KBD)
   target_include_directories(app PRIVATE ${ZEPHYR_BASE}/subsys/usb/host)
 endif()
