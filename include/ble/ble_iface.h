@@ -52,6 +52,11 @@ bool ble_hid_ready(void);
  * (e.g. -ENOMEM) on transient buffer exhaustion. */
 int ble_hid_notify(const uint8_t *data, size_t len);
 
+/* Current negotiated connection interval in milliseconds, or
+ * CONFIG_HID_REPORT_INTERVAL when no link is up / the value is unknown. The
+ * report pacer clamps this to [5, 30] ms for its send grid. */
+uint16_t ble_hid_conn_interval_ms(void);
+
 /* ---- Bonding / pairing ----------------------------------------------------- */
 
 /* Inject the pre-derived LTK + peer address into the host's bonding context so

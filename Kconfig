@@ -29,7 +29,19 @@ config HID_REPORT_INTERVAL
 	range 5 100
 	help
 	  Interval between HID input report notifications. Lower values reduce
-	  latency at the cost of CPU and BLE bandwidth.
+	  latency at the cost of CPU and BLE bandwidth. This is now only the
+	  FALLBACK the report pacer uses when no link is up; with a connection
+	  the send grid tracks the negotiated interval (clamped to 5-30 ms).
+
+config JOY_BRIDGE_REPORT_BURST
+	int "HID report fresh-input burst budget"
+	default 3
+	range 1 8
+	help
+	  How many fresh committed input reports may send back-to-back without
+	  waiting for the send grid, per report_pacer.c. Sparse change-driven
+	  input (e.g. keyboard) goes out immediately; dense streams degrade to
+	  the interval cap once the burst is spent, protecting the BLE TX pool.
 
 config JOY_BRIDGE_BLE_MIN_CONN_INTERVAL
 	int "Requested minimum connection interval (units of 1.25 ms)"

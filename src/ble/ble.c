@@ -53,6 +53,18 @@ LOG_MODULE_REGISTER(jb_ble, CONFIG_JOY_BRIDGE_LOG_LEVEL);
 static struct bt_conn *default_conn;
 static uint8_t adv_id = BT_ID_DEFAULT;
 
+/* Last negotiated connection interval in 1.25 ms units (0 = unknown/no link).
+ * Written from on_connected / on_le_param_updated, read by the HID report
+ * pacer via ble_hid_conn_interval_ms(); single-core, benign tearing. */
+static volatile uint16_t s_conn_interval_units;
+
+uint16_t ble_hid_conn_interval_ms(void) {
+    if (default_conn == NULL || s_conn_interval_units == 0) {
+        return CONFIG_HID_REPORT_INTERVAL;
+    }
+    return (uint16_t)((s_conn_interval_units * 5u) / 4u);
+}
+
 /* ESP32-S3 btdm controller hooks for sub-spec connection intervals (defined in
  * the blob's arch_main.o). The driver is meant to call this from
  * btdm_funcs_table_ready_wrapper(); we also force it at runtime in case that
@@ -231,6 +243,7 @@ static void on_connected(struct bt_conn *conn, uint8_t err) {
              * Zephyr in favour of interval_us; derive the units value once for
              * the log line and the param-update request below. */
             uint16_t interval = (uint16_t)(info.le.interval_us / 1250U);
+            s_conn_interval_units = interval;
             const uint8_t *na = g_console_ns2.ble_addr.val;
             /* One canonical line to console + persistent journal: NS2 address,
              * interval (raw units + pretty ms), latency, supervision timeout. */
@@ -278,6 +291,7 @@ static void on_disconnected(struct bt_conn *conn, uint8_t reason) {
     k_sched_lock();
     struct bt_conn *gone = default_conn;
     default_conn = NULL;
+    s_conn_interval_units = 0;
     k_sched_unlock();
     if (gone) {
         bt_conn_unref(gone);
@@ -315,6 +329,7 @@ static bool on_le_param_req(struct bt_conn *conn, struct bt_le_conn_param *param
 
 static void on_le_param_updated(struct bt_conn *conn, uint16_t interval,
                                 uint16_t latency, uint16_t timeout) {
+    s_conn_interval_units = interval;
     JOURNAL(CONN, Display, All, "conn itvl=%u (%u.%02u ms) lat=%u to=%u",
             interval, (interval * 5) / 4, ((interval * 5) % 4) * 25, latency, timeout);
 #if defined(CONFIG_BT_SMP) && CONFIG_JOY_BRIDGE_BLE_FAST_CONN_INTERVAL > 0

@@ -7,6 +7,7 @@
 
 #include "controller/hid_controller.h"
 #include "controller/hid_controller_pro2.h"
+#include "controller/report_pacer.h"
 #include "device.h"
 #include "utils.h"
 
@@ -84,9 +85,11 @@ static void controller_task(void *p1, void *p2, void *p3) {
     ARG_UNUSED(p2);
     ARG_UNUSED(p3);
 
-    ESP_LOGI(LOG_HID, "controller report task start, interval: %dms", HID_REPORT_INTERVAL);
+    ESP_LOGI(LOG_HID, "controller report task start (send grid tracks link interval, burst=%d)",
+             CONFIG_JOY_BRIDGE_REPORT_BURST);
 
-    int64_t last_send_ms = 0;
+    report_pacer_t pacer;
+    report_pacer_init(&pacer, CONFIG_JOY_BRIDGE_REPORT_BURST);
 
     while (ctrl->task_running) {
         /* Connected + HID characteristic subscribed + DEV_READY? */
@@ -95,14 +98,19 @@ static void controller_task(void *p1, void *p2, void *p3) {
              * plain sleep) so stop_task() — which gives it — wakes us promptly to
              * observe task_running and exit, bounding the join in stop_task(). */
             k_sem_take(&report_ready_sem, K_MSEC(100));
-            last_send_ms = 0;
+            report_pacer_reset(&pacer);
             continue;
         }
 
+        /* The send grid tracks the negotiated connection interval (5-30 ms), so
+         * a fast link gets a fast cadence and the NS2's power-save downgrades
+         * are matched instead of overrun (the fixed-5 ms regression). */
+        const uint16_t interval_ms =
+            report_pacer_clamp_interval(ble_hid_conn_interval_ms());
+
         /* Wake the instant a report is committed; fall back to a keepalive after
-         * HID_REPORT_INTERVAL so a held/idle state still streams at the normal
-         * cadence. */
-        k_sem_take(&report_ready_sem, K_MSEC(HID_REPORT_INTERVAL));
+         * one interval so a held/idle state still streams at the link rate. */
+        k_sem_take(&report_ready_sem, K_MSEC(interval_ms));
 
         /* Stopped while we were waiting? Leave now — before any send — so
          * stop_task()'s join returns promptly and we never notify on a link being
@@ -111,17 +119,19 @@ static void controller_task(void *p1, void *p2, void *p3) {
             break;
         }
 
-        /* Cap sends at ~one per HID_REPORT_INTERVAL so dense input can't backlog
-         * the BLE TX queue; the snapshot below still sends the freshest committed
-         * report. The active value is the 15 ms Kconfig default: a FIXED 5 ms
-         * cadence was tried and regressed on hardware — during the NS2's periodic
-         * power-save downgrades to ~30 ms the TX context pool (10) can't drain
-         * 200 Hz of sends, so notifies stalled on -ENOMEM. Lowering the cap safely
-         * needs it to track the negotiated connection interval (open follow-up),
-         * not a fixed value. */
-        int64_t now_ms = k_uptime_get();
-        if (last_send_ms != 0 && (now_ms - last_send_ms) < HID_REPORT_INTERVAL) {
-            k_msleep(HID_REPORT_INTERVAL - (uint32_t)(now_ms - last_send_ms));
+        /* Fresh committed input bursts out immediately (token budget, see
+         * report_pacer.c); once the burst is spent, sends are held to the
+         * interval grid so dense streams can't backlog the BLE TX queue. The
+         * snapshot below always sends the freshest committed report. */
+        bool fresh_peek;
+        k_sched_lock();
+        fresh_peek = (ctrl->buffer.swap_request != 0u);
+        k_sched_unlock();
+
+        const uint32_t delay_ms =
+            report_pacer_delay_ms(&pacer, fresh_peek, k_uptime_get(), interval_ms);
+        if (delay_ms != 0u) {
+            k_msleep(delay_ms);
         }
 
         if (ctrl->buffer.front_buffer != NULL) {
@@ -170,9 +180,8 @@ static void controller_task(void *p1, void *p2, void *p3) {
 #ifdef CONFIG_JOY_BRIDGE_DIAG_LATENCY
             jb_diag_lat_sample(had_new);
 #endif
+            report_pacer_on_sent(&pacer, fresh_peek, k_uptime_get());
         }
-
-        last_send_ms = k_uptime_get();
     }
 }
 
