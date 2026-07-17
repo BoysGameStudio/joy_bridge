@@ -40,36 +40,32 @@ struct kbd_keymap_entry {
 };
 
 static const struct kbd_keymap_entry kbd_keymap[] = {
-    /* WASD -> left stick */
-    {0x1Au, KBD_KIND_STICK, KBD_AXIS_LY, 1u}, /* W -> ly up    */
-    {0x04u, KBD_KIND_STICK, KBD_AXIS_LX, 0u}, /* A -> lx left  */
-    {0x16u, KBD_KIND_STICK, KBD_AXIS_LY, 0u}, /* S -> ly down  */
-    {0x07u, KBD_KIND_STICK, KBD_AXIS_LX, 1u}, /* D -> lx right */
-    /* IJKL -> right stick */
-    {0x0Cu, KBD_KIND_STICK, KBD_AXIS_RY, 1u}, /* I -> ry up    */
-    {0x0Du, KBD_KIND_STICK, KBD_AXIS_RX, 0u}, /* J -> rx left  */
-    {0x0Eu, KBD_KIND_STICK, KBD_AXIS_RY, 0u}, /* K -> ry down  */
-    {0x0Fu, KBD_KIND_STICK, KBD_AXIS_RX, 1u}, /* L -> rx right */
-    /* Arrow keys -> dpad */
+    /* Hit Box-style directions (left hand) -> left stick; thumb = up. */
+    {0x16u, KBD_KIND_STICK, KBD_AXIS_LX, 0u}, /* S     -> lx left  */
+    {0x09u, KBD_KIND_STICK, KBD_AXIS_LX, 1u}, /* F     -> lx right */
+    {0x07u, KBD_KIND_STICK, KBD_AXIS_LY, 0u}, /* D     -> ly down  */
+    {0x2Cu, KBD_KIND_STICK, KBD_AXIS_LY, 1u}, /* Space -> ly up    */
+    /* Arrow keys -> dpad (menus). */
     {0x51u, KBD_KIND_BTN, 1u, 0x01u}, /* Down  */
     {0x4Fu, KBD_KIND_BTN, 1u, 0x02u}, /* Right */
     {0x50u, KBD_KIND_BTN, 1u, 0x04u}, /* Left  */
     {0x52u, KBD_KIND_BTN, 1u, 0x08u}, /* Up    */
-    /* Face buttons, shoulders, meta */
-    {0x1Du, KBD_KIND_BTN, 0u, 0x01u}, /* Z -> B        */
-    {0x1Bu, KBD_KIND_BTN, 0u, 0x02u}, /* X -> A        */
-    {0x06u, KBD_KIND_BTN, 0u, 0x04u}, /* C -> Y        */
-    {0x19u, KBD_KIND_BTN, 0u, 0x08u}, /* V -> X        */
-    {0x08u, KBD_KIND_BTN, 0u, 0x10u}, /* E -> R        */
-    {0x20u, KBD_KIND_BTN, 0u, 0x20u}, /* 3 -> ZR       */
-    {0x28u, KBD_KIND_BTN, 0u, 0x40u}, /* Enter -> Plus */
-    {0x0Au, KBD_KIND_BTN, 0u, 0x80u}, /* G -> RClick   */
-    {0x14u, KBD_KIND_BTN, 1u, 0x10u}, /* Q -> L        */
-    {0x1Eu, KBD_KIND_BTN, 1u, 0x20u}, /* 1 -> ZL       */
-    {0x2Au, KBD_KIND_BTN, 1u, 0x40u}, /* Backspace -> Minus  */
-    {0x09u, KBD_KIND_BTN, 1u, 0x80u}, /* F -> LClick         */
-    {0x0Bu, KBD_KIND_BTN, 2u, 0x01u}, /* H -> Home           */
-    {0x13u, KBD_KIND_BTN, 2u, 0x02u}, /* P -> Capture        */
+    /* Attack buttons (right hand), SF6 Classic relative positions. */
+    {0x18u, KBD_KIND_BTN, 0u, 0x04u}, /* U -> Y  (Light Punch)  */
+    {0x0Cu, KBD_KIND_BTN, 0u, 0x08u}, /* I -> X  (Medium Punch) */
+    {0x12u, KBD_KIND_BTN, 0u, 0x10u}, /* O -> R  (Heavy Punch)  */
+    {0x13u, KBD_KIND_BTN, 1u, 0x10u}, /* P -> L  (Throw)        */
+    {0x0Du, KBD_KIND_BTN, 0u, 0x01u}, /* J -> B  (Light Kick)   */
+    {0x0Eu, KBD_KIND_BTN, 0u, 0x02u}, /* K -> A  (Medium Kick)  */
+    {0x0Fu, KBD_KIND_BTN, 0u, 0x20u}, /* L -> ZR (Heavy Kick)   */
+    {0x33u, KBD_KIND_BTN, 1u, 0x20u}, /* ; -> ZL (Parry)        */
+    /* System + stick clicks. */
+    {0x2Du, KBD_KIND_BTN, 1u, 0x40u}, /* - -> Minus   */
+    {0x2Eu, KBD_KIND_BTN, 0u, 0x40u}, /* = -> Plus    */
+    {0x14u, KBD_KIND_BTN, 2u, 0x01u}, /* Q -> Home    */
+    {0x17u, KBD_KIND_BTN, 2u, 0x02u}, /* T -> Capture */
+    {0x1Cu, KBD_KIND_BTN, 1u, 0x80u}, /* Y -> LClick  */
+    {0x0Bu, KBD_KIND_BTN, 0u, 0x80u}, /* H -> RClick  */
 };
 
 #define KBD_KEYMAP_LEN (sizeof(kbd_keymap) / sizeof(kbd_keymap[0]))

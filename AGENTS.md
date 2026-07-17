@@ -255,9 +255,11 @@ so `src/usb_host/kbd_class.c` is a from-scratch USBH class driver mirroring `xin
   No report-descriptor parsing, no keyboard LEDs, no hubs — so pad and keyboard are never attached
   simultaneously; whichever device binds drives the input.
 - **Keymap table:** the single `static const` table lives in `src/input/kbd_parse.c` (pure parser,
-  zero Zephyr deps — unit-tested on host): WASD→LStick, IJKL→RStick, arrows→dpad,
-  Z/X/C/V→B/A/Y/X, Q/E→L/R, 1/3→ZL/ZR, Enter→Plus, Backspace→Minus, H→Home, P→Capture,
-  F/G→LClick/RClick. Opposing direction keys on one axis cancel to center; sticks center on release.
+  zero Zephyr deps — unit-tested on host). Hit Box-style leverless layout: S/D/F/Space→LStick
+  (thumb=up), arrows→dpad, attacks in SF6 Classic positions — U/I/O/P→Y/X/R/L,
+  J/K/L/;→B/A/ZR/ZL — -/=→Minus/Plus, Q→Home, T→Capture, Y/H→LClick/RClick. The right stick is
+  unmapped. Opposing direction keys on one axis cancel to center (True Neutral SOCD — CPT-legal);
+  sticks center on release.
 - **Merge architecture (`src/input/input_merge.c`):** both mappers (`xinput_map.c`, `kbd_map.c`)
   feed per-source contribution state into the merge composer, which is the **ONLY writer of the
   HID back buffer** (guards + `set_button_custom`/`set_left_stick`/`set_right_stick`/`hid_commit`

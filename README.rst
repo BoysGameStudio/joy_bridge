@@ -71,8 +71,8 @@ wired **XInput (Xbox 360) pad** (``CONFIG_JOY_BRIDGE_USB_XINPUT``) and a USB
 bind). Both feed a merge composer (``src/input/input_merge.c``), the single
 writer of the HID back buffer: buttons are OR-ed across sources, sticks are
 last-writer-wins per stick event (ties resolve to XInput). The keyboard keymap
-(WASD→left stick, arrows→dpad, Z/X/C/V→B/A/Y/X, Enter→Plus, …) lives in
-``src/input/kbd_parse.c`` and is unit-tested on the host
+(Hit Box-style: S/D/F/Space→left stick, U I O P / J K L ;→attack buttons, …)
+lives in ``src/input/kbd_parse.c`` and is unit-tested on the host
 (``tests/kbd_parse/``).
 
 5 ms connection interval

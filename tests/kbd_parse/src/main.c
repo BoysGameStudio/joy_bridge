@@ -10,7 +10,8 @@
  *  4. usages 0x02/0x03 in any slot -> same filter
  *  5. len < 8 rejected
  *  6. modifiers tracked (bit0 LCtrl .. bit7 RGUI), unused by default map
- *  7. stick mapping (WASD / IJKL, cancel + diagonal)
+ *  7. stick mapping (Hit Box-style S/D/F/Space -> left stick, cancel +
+ *     diagonal; right stick unmapped; unmapped keys produce no output)
  *  8. button mapping (full keymap table)
  *  9. full release -> neutral output
  */
@@ -21,27 +22,28 @@
 
 /* HID usage IDs (boot keyboard page 0x07). */
 #define HID_A 0x04u
-#define HID_C 0x06u
 #define HID_D 0x07u
 #define HID_E 0x08u
 #define HID_F 0x09u
-#define HID_G 0x0Au
 #define HID_H 0x0Bu
 #define HID_I 0x0Cu
 #define HID_J 0x0Du
 #define HID_K 0x0Eu
 #define HID_L 0x0Fu
+#define HID_O 0x12u
 #define HID_P 0x13u
 #define HID_Q 0x14u
 #define HID_S 0x16u
-#define HID_V 0x19u
+#define HID_T 0x17u
+#define HID_U 0x18u
 #define HID_W 0x1Au
-#define HID_X 0x1Bu
+#define HID_Y 0x1Cu
 #define HID_Z 0x1Du
-#define HID_1 0x1Eu
-#define HID_3 0x20u
 #define HID_ENTER 0x28u
-#define HID_BKSP 0x2Au
+#define HID_SPACE 0x2Cu
+#define HID_MINUS 0x2Du
+#define HID_EQUAL 0x2Eu
+#define HID_SEMI 0x33u
 #define HID_ARR_RIGHT 0x4Fu
 #define HID_ARR_LEFT 0x50u
 #define HID_ARR_DOWN 0x51u
@@ -134,25 +136,25 @@ ZTEST(kbd_parse, test_press_release_slot_diff)
 
     kbd_state_init(&st);
     zassert_false(st.primed, "primed before any report");
-    zassert_false(kbd_key_held(&st, HID_W), "held before any report");
+    zassert_false(kbd_key_held(&st, HID_F), "held before any report");
 
-    mk_report(r, 0u, HID_W, 0u, 0u, 0u, 0u, 0u);
+    mk_report(r, 0u, HID_F, 0u, 0u, 0u, 0u, 0u);
     zassert_true(kbd_state_update(&st, r, sizeof(r)), "press rejected");
     zassert_true(st.primed, "not primed after valid report");
-    zassert_true(kbd_key_held(&st, HID_W), "W not held after press");
+    zassert_true(kbd_key_held(&st, HID_F), "F not held after press");
     zassert_equal(st.prev[0], 0u, "prev should be empty on first report");
 
     kbd_state_to_output(&st, &out);
-    zassert_equal(out.ly, STICK_MAX, "W held: ly not deflected up");
+    zassert_equal(out.lx, STICK_MAX, "F held: lx not deflected right");
 
-    /* W absent from the next report -> released; prev captures the diff. */
+    /* F absent from the next report -> released; prev captures the diff. */
     mk_report(r, 0u, 0u, 0u, 0u, 0u, 0u, 0u);
     zassert_true(kbd_state_update(&st, r, sizeof(r)), "release rejected");
-    zassert_false(kbd_key_held(&st, HID_W), "W still held after release");
-    zassert_equal(st.prev[0], HID_W, "prev lost the released key");
+    zassert_false(kbd_key_held(&st, HID_F), "F still held after release");
+    zassert_equal(st.prev[0], HID_F, "prev lost the released key");
 
     kbd_state_to_output(&st, &out);
-    zassert_equal(out.ly, STICK_CTR, "W released: ly not re-centered");
+    zassert_equal(out.lx, STICK_CTR, "F released: lx not re-centered");
 }
 
 /* (2) 6 simultaneous keys all register. */
@@ -163,25 +165,27 @@ ZTEST(kbd_parse, test_six_simultaneous_keys)
     uint8_t r[8];
 
     kbd_state_init(&st);
-    mk_report(r, 0u, HID_W, HID_D, HID_I, HID_L, HID_Z, HID_ENTER);
+    mk_report(r, 0u, HID_U, HID_I, HID_O, HID_J, HID_K, HID_L);
     zassert_true(kbd_state_update(&st, r, sizeof(r)), "6-key report rejected");
 
-    zassert_true(kbd_key_held(&st, HID_W), "W missing");
-    zassert_true(kbd_key_held(&st, HID_D), "D missing");
+    zassert_true(kbd_key_held(&st, HID_U), "U missing");
     zassert_true(kbd_key_held(&st, HID_I), "I missing");
+    zassert_true(kbd_key_held(&st, HID_O), "O missing");
+    zassert_true(kbd_key_held(&st, HID_J), "J missing");
+    zassert_true(kbd_key_held(&st, HID_K), "K missing");
     zassert_true(kbd_key_held(&st, HID_L), "L missing");
-    zassert_true(kbd_key_held(&st, HID_Z), "Z missing");
-    zassert_true(kbd_key_held(&st, HID_ENTER), "Enter missing");
     zassert_false(kbd_key_held(&st, HID_A), "phantom A");
 
     kbd_state_to_output(&st, &out);
-    zassert_equal(out.lx, STICK_MAX, "D: lx");
-    zassert_equal(out.ly, STICK_MAX, "W: ly");
-    zassert_equal(out.rx, STICK_MAX, "L: rx");
-    zassert_equal(out.ry, STICK_MAX, "I: ry");
-    zassert_equal(out.btn[0], 0x01u | 0x40u, "Z(B)+Enter(Plus)");
+    /* U(Y)+I(X)+O(R)+J(B)+K(A)+L(ZR): every btn[0] bit except Plus/RClick. */
+    zassert_equal(out.btn[0], 0x3Fu, "UIO JKL: btn[0]");
     zassert_equal(out.btn[1], 0u, "btn[1]");
     zassert_equal(out.btn[2], 0u, "btn[2]");
+    /* Button-only keys leave all sticks centered. */
+    zassert_equal(out.lx, STICK_CTR, "lx");
+    zassert_equal(out.ly, STICK_CTR, "ly");
+    zassert_equal(out.rx, STICK_CTR, "rx");
+    zassert_equal(out.ry, STICK_CTR, "ry");
 }
 
 /* (3) phantom/rollover (all slots 0x01) -> keys ignored, mods preserved. */
@@ -290,72 +294,70 @@ ZTEST(kbd_parse, test_modifiers_tracked)
     }
 }
 
-/* (7) stick mapping: WASD -> left, IJKL -> right, cancel + diagonal. */
+/* (7) stick mapping: S/D/F/Space -> left stick; right stick unmapped. */
 ZTEST(kbd_parse, test_stick_mapping)
 {
     kbd_output_t out;
 
-    output_for_keys(&out, HID_W, 0u);
-    zassert_equal(out.ly, STICK_MAX, "W: ly");
-    zassert_equal(out.lx, STICK_CTR, "W: lx");
-    zassert_equal(out.rx, STICK_CTR, "W: rx");
-    zassert_equal(out.ry, STICK_CTR, "W: ry");
+    output_for_keys(&out, HID_SPACE, 0u);
+    zassert_equal(out.ly, STICK_MAX, "Space: ly");
+    zassert_equal(out.lx, STICK_CTR, "Space: lx");
+    zassert_equal(out.rx, STICK_CTR, "Space: rx");
+    zassert_equal(out.ry, STICK_CTR, "Space: ry");
 
     /* Diagonal deflects both axes. */
-    output_for_keys(&out, HID_W, HID_D);
-    zassert_equal(out.lx, STICK_MAX, "W+D: lx");
-    zassert_equal(out.ly, STICK_MAX, "W+D: ly");
+    output_for_keys(&out, HID_SPACE, HID_F);
+    zassert_equal(out.lx, STICK_MAX, "Space+F: lx");
+    zassert_equal(out.ly, STICK_MAX, "Space+F: ly");
 
-    /* Opposing keys on one axis cancel to center. */
-    output_for_keys(&out, HID_W, HID_S);
-    zassert_equal(out.ly, STICK_CTR, "W+S: ly not canceled");
-    output_for_keys(&out, HID_A, HID_D);
-    zassert_equal(out.lx, STICK_CTR, "A+D: lx not canceled");
+    /* Opposing keys on one axis cancel to center (True Neutral SOCD). */
+    output_for_keys(&out, HID_SPACE, HID_D);
+    zassert_equal(out.ly, STICK_CTR, "Space+D: ly not canceled");
+    output_for_keys(&out, HID_S, HID_F);
+    zassert_equal(out.lx, STICK_CTR, "S+F: lx not canceled");
 
-    output_for_keys(&out, HID_S, 0u);
-    zassert_equal(out.ly, STICK_MIN, "S: ly");
-    output_for_keys(&out, HID_A, 0u);
-    zassert_equal(out.lx, STICK_MIN, "A: lx");
     output_for_keys(&out, HID_D, 0u);
-    zassert_equal(out.lx, STICK_MAX, "D: lx");
+    zassert_equal(out.ly, STICK_MIN, "D: ly");
+    output_for_keys(&out, HID_S, 0u);
+    zassert_equal(out.lx, STICK_MIN, "S: lx");
+    output_for_keys(&out, HID_F, 0u);
+    zassert_equal(out.lx, STICK_MAX, "F: lx");
 
-    /* IJKL -> right stick (independent of left). */
-    output_for_keys(&out, HID_I, 0u);
-    zassert_equal(out.ry, STICK_MAX, "I: ry");
-    zassert_equal(out.ly, STICK_CTR, "I: ly touched");
-    output_for_keys(&out, HID_K, 0u);
-    zassert_equal(out.ry, STICK_MIN, "K: ry");
-    output_for_keys(&out, HID_J, 0u);
-    zassert_equal(out.rx, STICK_MIN, "J: rx");
-    output_for_keys(&out, HID_L, 0u);
-    zassert_equal(out.rx, STICK_MAX, "L: rx");
-    output_for_keys(&out, HID_I, HID_K);
-    zassert_equal(out.ry, STICK_CTR, "I+K: ry not canceled");
+    /* The right stick has no mapped keys: nothing ever deflects it. */
+    output_for_keys(&out, HID_U, HID_J);
+    zassert_equal(out.rx, STICK_CTR, "rx mapped");
+    zassert_equal(out.ry, STICK_CTR, "ry mapped");
+
+    /* Unmapped keys (e.g. W) produce no output at all. */
+    output_for_keys(&out, HID_W, 0u);
+    assert_neutral(&out);
 }
 
 /* (8) full button keymap. */
 ZTEST(kbd_parse, test_button_mapping)
 {
-    assert_button_map(HID_Z, 0u, 0x01u);     /* B      */
-    assert_button_map(HID_X, 0u, 0x02u);     /* A      */
-    assert_button_map(HID_C, 0u, 0x04u);     /* Y      */
-    assert_button_map(HID_V, 0u, 0x08u);     /* X      */
-    assert_button_map(HID_E, 0u, 0x10u);     /* R      */
-    assert_button_map(HID_3, 0u, 0x20u);     /* ZR     */
-    assert_button_map(HID_ENTER, 0u, 0x40u); /* Plus   */
-    assert_button_map(HID_G, 0u, 0x80u);     /* RClick */
+    /* Attack buttons (right hand), SF6 Classic relative positions. */
+    assert_button_map(HID_U, 0u, 0x04u);     /* Y  (Light Punch)  */
+    assert_button_map(HID_I, 0u, 0x08u);     /* X  (Medium Punch) */
+    assert_button_map(HID_O, 0u, 0x10u);     /* R  (Heavy Punch)  */
+    assert_button_map(HID_P, 1u, 0x10u);     /* L  (Throw)        */
+    assert_button_map(HID_J, 0u, 0x01u);     /* B  (Light Kick)   */
+    assert_button_map(HID_K, 0u, 0x02u);     /* A  (Medium Kick)  */
+    assert_button_map(HID_L, 0u, 0x20u);     /* ZR (Heavy Kick)   */
+    assert_button_map(HID_SEMI, 1u, 0x20u);  /* ZL (Parry)        */
 
     assert_button_map(HID_ARR_DOWN, 1u, 0x01u);
     assert_button_map(HID_ARR_RIGHT, 1u, 0x02u);
     assert_button_map(HID_ARR_LEFT, 1u, 0x04u);
     assert_button_map(HID_ARR_UP, 1u, 0x08u);
-    assert_button_map(HID_Q, 1u, 0x10u);     /* L      */
-    assert_button_map(HID_1, 1u, 0x20u);     /* ZL     */
-    assert_button_map(HID_BKSP, 1u, 0x40u);  /* Minus  */
-    assert_button_map(HID_F, 1u, 0x80u);     /* LClick */
 
-    assert_button_map(HID_H, 2u, 0x01u);     /* Home    */
-    assert_button_map(HID_P, 2u, 0x02u);     /* Capture */
+    /* System + stick clicks. */
+    assert_button_map(HID_MINUS, 1u, 0x40u); /* Minus   */
+    assert_button_map(HID_EQUAL, 0u, 0x40u); /* Plus    */
+    assert_button_map(HID_Q, 2u, 0x01u);     /* Home    */
+    assert_button_map(HID_T, 2u, 0x02u);     /* Capture */
+    assert_button_map(HID_Y, 1u, 0x80u);     /* LClick  */
+    assert_button_map(HID_H, 0u, 0x80u);     /* RClick  */
 
     /* Simultaneous buttons OR into the same byte. */
     kbd_state_t st;
@@ -363,10 +365,10 @@ ZTEST(kbd_parse, test_button_mapping)
     uint8_t r[8];
 
     kbd_state_init(&st);
-    mk_report(r, 0u, HID_Z, HID_X, HID_V, 0u, 0u, 0u);
+    mk_report(r, 0u, HID_U, HID_J, HID_K, 0u, 0u, 0u);
     zassert_true(kbd_state_update(&st, r, sizeof(r)), "update rejected");
     kbd_state_to_output(&st, &out);
-    zassert_equal(out.btn[0], 0x01u | 0x02u | 0x08u, "Z+X+V not OR-ed");
+    zassert_equal(out.btn[0], 0x04u | 0x01u | 0x02u, "U+J+K not OR-ed");
 }
 
 /* (9) full release -> all buttons zero, all sticks centered. */
@@ -382,7 +384,7 @@ ZTEST(kbd_parse, test_full_release_neutral)
     kbd_state_to_output(&st, &out);
     assert_neutral(&out);
 
-    mk_report(r, MOD_LCTRL, HID_W, HID_D, HID_Z, HID_ENTER, HID_I, HID_G);
+    mk_report(r, MOD_LCTRL, HID_F, HID_SPACE, HID_U, HID_J, HID_K, HID_O);
     zassert_true(kbd_state_update(&st, r, sizeof(r)), "press rejected");
     kbd_state_to_output(&st, &out);
     zassert_not_equal(out.btn[0], 0u, "no buttons after press");
