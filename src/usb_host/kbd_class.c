@@ -48,11 +48,14 @@ LOG_MODULE_DECLARE(jb_usb, CONFIG_JOY_BRIDGE_LOG_LEVEL);
  * the rate). Only one device can be attached at a time (no hub), so UHC pool
  * pressure is not additive with the XInput driver. */
 #define KBD_NUM_XFERS 2
+/* Consecutive endpoint stalls tolerated before the poll is abandoned. */
+#define KBD_STALL_MAX 3
 
 struct kbd_instance {
 	struct usb_device *udev;
 	struct uhc_transfer *xfers[KBD_NUM_XFERS];
 	uint16_t ep_mps;
+	uint8_t stalls; /* consecutive -EPIPEs, for the recovery bound */
 	bool running;
 };
 
@@ -168,17 +171,28 @@ static int kbd_in_cb(struct usb_device *udev, struct uhc_transfer *xfer)
 		kbd_map_report(xfer->buf->data, xfer->buf->len);
 	}
 
-	/* Stop re-arming on a terminal condition: device going away, or the endpoint
-	 * stalled (-EPIPE) — re-submitting a halted endpoint without a CLEAR_FEATURE
-	 * (not issued here) would just immediately re-stall. Transient errors fall
-	 * through and the interrupt poll is re-armed. */
+	/* Device going away: stop re-arming (terminal). A stalled endpoint
+	 * (-EPIPE) is recoverable instead: CLEAR_FEATURE(ENDPOINT_HALT) resets
+	 * both sides' data toggles, the driver reconfigures the channel on the
+	 * next transfer, and the poll resumes. Give up after KBD_STALL_MAX
+	 * consecutive stalls (a genuinely broken endpoint would loop forever).
+	 * Transient errors fall through and the interrupt poll is re-armed. */
 	if (xfer->err == -ECONNRESET || xfer->err == -ESHUTDOWN ||
-	    xfer->err == -ENODEV || xfer->err == -EPIPE) {
-		if (xfer->err == -EPIPE) {
-			LOG_WRN("kbd IN endpoint stalled; stopping poll");
-			inst->running = false;
-		}
+	    xfer->err == -ENODEV) {
 		return 0;
+	}
+	if (xfer->err == -EPIPE) {
+		inst->stalls++;
+		if (inst->stalls > KBD_STALL_MAX) {
+			LOG_WRN("kbd IN endpoint stalled x%u; stopping poll", inst->stalls);
+			inst->running = false;
+			return 0;
+		}
+		const int rc = usbh_req_clear_sfs_halt(udev, xfer->ep);
+		LOG_WRN("kbd IN stall #%u: clear_halt rc=%d; resuming poll",
+			inst->stalls, rc);
+	} else if (xfer->err == 0) {
+		inst->stalls = 0;
 	}
 
 	if (xfer->buf != NULL) {

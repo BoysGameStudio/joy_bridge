@@ -300,6 +300,14 @@ static void uhc_dwc2_fail_or_retry(const struct device *dev, int err)
 		LOG_WRN("control xfer err %d -> retries exhausted (%u)", err, data->retries);
 	}
 
+	if (err == -EPIPE) {
+		/* A stalled endpoint also halts the channel and freezes the data
+		 * toggle; invalidate the cached target so the next transfer fully
+		 * reconfigures (fresh DATA0). That is what lets a class-level
+		 * CLEAR_FEATURE(ENDPOINT_HALT) actually recover the pipe. */
+		data->cur_ep = 0xFF;
+	}
+
 	uhc_xfer_return(dev, xfer, err);
 	data->active = NULL;
 	data->retries = 0;
