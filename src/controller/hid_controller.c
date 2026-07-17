@@ -113,9 +113,12 @@ static void controller_task(void *p1, void *p2, void *p3) {
 
         /* Cap sends at ~one per HID_REPORT_INTERVAL so dense input can't backlog
          * the BLE TX queue; the snapshot below still sends the freshest committed
-         * report. Set CONFIG_HID_REPORT_INTERVAL to the (fast) connection interval
-         * — prj.conf uses 5 ms to match the 200 Hz link; the stock 15 ms default
-         * would throttle input to ~66 Hz regardless of how fast the link runs. */
+         * report. The active value is the 15 ms Kconfig default: a FIXED 5 ms
+         * cadence was tried and regressed on hardware — during the NS2's periodic
+         * power-save downgrades to ~30 ms the TX context pool (10) can't drain
+         * 200 Hz of sends, so notifies stalled on -ENOMEM. Lowering the cap safely
+         * needs it to track the negotiated connection interval (open follow-up),
+         * not a fixed value. */
         int64_t now_ms = k_uptime_get();
         if (last_send_ms != 0 && (now_ms - last_send_ms) < HID_REPORT_INTERVAL) {
             k_msleep(HID_REPORT_INTERVAL - (uint32_t)(now_ms - last_send_ms));
