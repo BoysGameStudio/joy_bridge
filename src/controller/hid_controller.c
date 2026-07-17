@@ -57,10 +57,16 @@ static void jb_diag_lat_sample(bool had_new) {
 
     if (had_new) {
         uint32_t us = k_cyc_to_us_floor32(k_cycle_get_32() - jb_diag_in_cyc);
-        lat_sum_us += us;
-        lat_n++;
-        if (us > lat_max_us) {
-            lat_max_us = us;
+        /* A sample older than 1 s is a stale-stamp artifact (e.g. the first
+         * send after connect consuming a stamp from before link-ready), not a
+         * real latency — swap_request is cleared on every send, so a genuine
+         * sample can never approach this. */
+        if (us <= 1000000u) {
+            lat_sum_us += us;
+            lat_n++;
+            if (us > lat_max_us) {
+                lat_max_us = us;
+            }
         }
     }
     int64_t now = k_uptime_get();
