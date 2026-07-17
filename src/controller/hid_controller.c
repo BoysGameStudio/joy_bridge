@@ -102,15 +102,21 @@ static void controller_task(void *p1, void *p2, void *p3) {
             continue;
         }
 
-        /* The send grid tracks the negotiated connection interval (5-30 ms), so
-         * a fast link gets a fast cadence and the NS2's power-save downgrades
-         * are matched instead of overrun (the fixed-5 ms regression). */
+        /* The dense-input send grid tracks the negotiated connection interval
+         * (5-30 ms): a fast link lets dense input through fast, and the NS2's
+         * power-save downgrades are matched instead of overrun (the fixed-5 ms
+         * regression). */
         const uint16_t interval_ms =
             report_pacer_clamp_interval(ble_hid_conn_interval_ms());
 
-        /* Wake the instant a report is committed; fall back to a keepalive after
-         * one interval so a held/idle state still streams at the link rate. */
-        k_sem_take(&report_ready_sem, K_MSEC(interval_ms));
+        /* Wake the instant a report is committed; fall back to a keepalive at
+         * the LOW HID_REPORT_INTERVAL cadence. The keepalive must NOT track the
+         * link rate: at 5 ms it would stream 200 Hz of neutral filler that
+         * saturates the BLE TX queue (drain = 1/event = 200/s), so fresh input
+         * notifies would queue BEHIND keepalives and wait on-air — the measured
+         * "feels laggy" regression. 66 Hz of keepalive leaves the queue empty
+         * so fresh input goes out on the next connection event. */
+        k_sem_take(&report_ready_sem, K_MSEC(HID_REPORT_INTERVAL));
 
         /* Stopped while we were waiting? Leave now — before any send — so
          * stop_task()'s join returns promptly and we never notify on a link being
