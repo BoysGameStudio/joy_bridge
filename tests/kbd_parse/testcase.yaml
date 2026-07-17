@@ -1,0 +1,11 @@
+tests:
+  input.keyboard:
+    harness: ztest
+    # 32-bit native_sim is Linux-only; the 64-bit variant runs on macOS too.
+    # qemu_x86 is the twister-runnable fallback on macOS hosts (native_sim is
+    # env-filtered off non-Linux hosts by upstream twister).
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+      - qemu_x86
+    tags: input keyboard

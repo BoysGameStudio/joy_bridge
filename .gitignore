@@ -3,6 +3,7 @@ build/
 build-*/
 twister-out/
 twister-out.*/
+twister-out-*/
 sysbuild/
 
 # Tooling / editor caches
