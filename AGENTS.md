@@ -220,19 +220,23 @@ Each was found by capturing the failing flow over serial and cross-checking the 
   HCD model) inside the driver remains the deeper option if the rate still needs lifting. Measure with
   `CONFIG_JOY_BRIDGE_DIAG_LATENCY=y` (input rate + arrival→notify latency, once/sec; both
   `xinput_map.c` and `kbd_map.c` stamp arrivals) — it auto-selects
-  `UHC_DWC2_DIAG_LATENCY` (the in-driver completion→re-arm probe). **Report pacing (DONE —
-  interval-tracking + burst, `src/controller/report_pacer.c`):** the report thread's send grid
-  tracks the negotiated connection interval (clamped 5–30 ms, read via
+  `UHC_DWC2_DIAG_LATENCY` (the in-driver completion→re-arm probe).   **Report pacing (DONE —
+  interval-tracking + burst, `src/controller/report_pacer.c`):** the report thread's dense-input
+  send grid tracks the negotiated connection interval (clamped 5–30 ms, read via
   `ble_hid_conn_interval_ms()` from ble.c's `on_connected`/`on_le_param_updated`) and fresh
   committed input sends immediately under a token-bucket burst (`CONFIG_JOY_BRIDGE_REPORT_BURST`,
-  default 3); dense streams degrade to the grid. `CONFIG_HID_REPORT_INTERVAL` (15 ms) is only the
-  no-link fallback now. This replaced the fixed 15 ms cap after measurement showed it dominated
-  input latency (in→notify avg 7.5 ms, max ~15 ms — the uniform(0,15) grid wait); with the pacer
-  the same measurement is **avg ~0.55 ms, max <1 ms** at the 5 ms link (~13× better), with zero
-  `-ENOMEM` including through a ~30 ms power-save episode (the grid backs off with the link). A
-  FIXED 5 ms cadence had regressed on hardware before (NS2 power-saves to ~30 ms → TX pool
-  "12 != 10" overrun → `-ENOMEM` stalls); tracking + drop-on-failure is why the pacer is safe
-  where fixed 5 ms was not. The pacer is pure C (no Zephyr deps), unit-tested in
+  default 3); dense streams degrade to the grid. The **keepalive stream stays at
+  `CONFIG_HID_REPORT_INTERVAL` (15 ms / 66 Hz) and must NOT track the link rate** — at 5 ms it
+  streamed 200 Hz of neutral filler that saturated the BLE TX queue (drain = 1/event = 200/s),
+  so fresh input queued behind keepalives and waited on-air (verified on hardware as a
+  "feels laggy" regression; the in→notify diag can't see the queue — it stops at the notify
+  call). `CONFIG_HID_REPORT_INTERVAL` is also the pacer's no-link fallback. The earlier fixed
+  15 ms cap measured in→notify avg 7.5 ms, max ~15 ms (the uniform(0,15) grid wait); with the
+  pacer the same measurement is **avg ~0.55 ms, max <1 ms** at the 5 ms link (~13× better),
+  with zero `-ENOMEM` including through a ~30 ms power-save episode (the grid backs off with
+  the link). A FIXED 5 ms cadence had regressed on hardware before (NS2 power-saves to ~30 ms →
+  TX pool "12 != 10" overrun → `-ENOMEM` stalls); tracking + drop-on-failure is why the pacer
+  is safe where fixed 5 ms was not. The pacer is pure C (no Zephyr deps), unit-tested in
   `tests/report_pacer/` like the keyboard parser.
 - **VBUS (hardware):** the internal PHY host mode does NOT source VBUS, and the DevKitC native USB-C
   VBUS is Schottky-isolated from 5 V — so the pad (or keyboard) gets no power and never enumerates
