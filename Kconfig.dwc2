@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# joy_bridge USB host (XInput) option.
+# joy_bridge USB host input options.
 #
 # Sourced AFTER Kconfig.zephyr (see Kconfig) so the upstream USB_HOST_STACK
 # symbol already exists and can be depended on here. The native DWC2 host-
@@ -15,3 +15,14 @@ config JOY_BRIDGE_USB_XINPUT
 	  USB-OTG port and map its gamepad reports onto the emulated Pro2 HID
 	  report. Requires a working host controller (CONFIG_UHC_DWC2, provided by
 	  the modules/uhc_dwc2_esp32 module).
+
+config JOY_BRIDGE_USB_KBD
+	bool "USB HID boot-protocol keyboard as a controller input source"
+	depends on USB_HOST_STACK
+	default n
+	help
+	  Read a wired USB HID boot-protocol keyboard (interface class 0x03,
+	  subclass 0x01 boot, protocol 0x01 keyboard) plugged into the
+	  ESP32-S3 USB-OTG port and merge its key presses with the XInput
+	  input onto the emulated Pro2 HID report. Boot-protocol keyboards
+	  only — NKRO/report-protocol-only keyboards are unsupported.
