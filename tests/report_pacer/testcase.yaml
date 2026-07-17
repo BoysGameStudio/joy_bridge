@@ -1,0 +1,10 @@
+tests:
+  controller.report_pacer:
+    harness: ztest
+    # native_sim for Linux CI; qemu_x86 is the twister-runnable fallback on
+    # macOS hosts (native_sim is env-filtered off non-Linux by upstream).
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+      - qemu_x86
+    tags: controller report pacer
