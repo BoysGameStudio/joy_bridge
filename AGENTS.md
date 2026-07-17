@@ -151,6 +151,7 @@ include/input/xinput.h, include/usb_host.h
 
 Data path: pad → `uhc_dwc2_esp32` (UHC) → Zephyr USBH stack → `xinput_class` (claims the gamepad
 interface, keeps a small pool of interrupt-IN polls queued) → `xinput_map_report()` →
+`input_merge.c` merge composer (the ONLY back-buffer writer — see the keyboard section below) →
 `g_hid_controller` back buffer → existing HID report thread → NS2. `main.c` calls
 `usb_host_start()` **after** BLE init so a USB failure can't block the load-bearing BLE path. The
 UHC driver is single-active (one channel runs one `uhc_transfer` at a time, the model the UHC layer
