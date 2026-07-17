@@ -50,6 +50,15 @@ static void kbd_publish(void)
 
 void kbd_map_report(const uint8_t *report, size_t len)
 {
+#ifdef CONFIG_JOY_BRIDGE_DIAG_LATENCY
+	/* Arrival stamp consumed by jb_diag_lat_sample() in the report thread
+	 * (mirrors the XInput stamp in src/input/xinput_map.c). */
+	extern volatile uint32_t jb_diag_in_cyc;
+	extern volatile uint32_t jb_diag_in_cnt;
+	jb_diag_in_cyc = k_cycle_get_32();
+	jb_diag_in_cnt++;
+#endif
+
 	if (!kbd_state_ready) {
 		kbd_state_init(&kbd_state);
 		kbd_state_ready = true;
